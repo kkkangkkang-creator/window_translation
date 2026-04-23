@@ -123,10 +123,7 @@ class TranslatorApp(QObject):
         self._app = app
         self._settings: AppSettings = load_settings()
 
-        self._overlay = ResultOverlay(
-            font_size=self._settings.overlay_font_size,
-            opacity=self._settings.overlay_opacity,
-        )
+        self._overlay = self._build_overlay()
 
         # Active capture region for region-pin mode.
         self._pinned_region: Optional[Region] = None
@@ -151,6 +148,15 @@ class TranslatorApp(QObject):
             self._notify(
                 "Global hotkey could not be registered. Use the tray menu instead."
             )
+
+    # ---------------------------------------------------------- overlay factory
+    def _build_overlay(self) -> ResultOverlay:
+        return ResultOverlay(
+            font_size=self._settings.overlay_font_size,
+            opacity=self._settings.overlay_opacity,
+            font_family=self._settings.overlay_font_family,
+            line_spacing_percent=self._settings.overlay_line_spacing,
+        )
 
     # ---------------------------------------------------------- tray / menu
     def _build_tray(self) -> QSystemTrayIcon:
@@ -323,10 +329,7 @@ class TranslatorApp(QObject):
             if not self._hotkey.start():
                 self._notify("Hotkey could not be re-registered. Use the tray menu.")
             # Re-style overlay by recreating it (simpler than hot-swapping styles).
-            self._overlay = ResultOverlay(
-                font_size=self._settings.overlay_font_size,
-                opacity=self._settings.overlay_opacity,
-            )
+            self._overlay = self._build_overlay()
 
     def _notify(self, message: str) -> None:
         if self._tray.isVisible():

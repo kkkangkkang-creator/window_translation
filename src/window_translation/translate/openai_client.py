@@ -32,6 +32,7 @@ class OpenAITranslator(Translator):
         endpoint: str = DEFAULT_ENDPOINT,
         timeout: float = DEFAULT_TIMEOUT,
         session: Optional[requests.Session] = None,
+        system_prompt_template: Optional[str] = None,
     ) -> None:
         if not api_key:
             raise TranslationError("Missing OpenAI API key.")
@@ -40,6 +41,7 @@ class OpenAITranslator(Translator):
         self.endpoint = endpoint
         self.timeout = timeout
         self._session = session or requests.Session()
+        self._system_prompt_template = system_prompt_template or None
 
     def translate(
         self,
@@ -54,11 +56,17 @@ class OpenAITranslator(Translator):
         if source_language:
             user_prefix = f"[source language hint: {source_language}]\n"
 
+        system_prompt = build_system_prompt(
+            target_language,
+            source_language=source_language,
+            template=self._system_prompt_template,
+        )
+
         payload = {
             "model": self.model,
             "temperature": 0.2,
             "messages": [
-                {"role": "system", "content": build_system_prompt(target_language)},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prefix + text},
             ],
         }

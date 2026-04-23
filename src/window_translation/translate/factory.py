@@ -33,7 +33,11 @@ def build_translator(settings: AppSettings, api_key: Optional[str] = None) -> Tr
                 provider,
             )
             return StubTranslator()
-        return OpenAITranslator(api_key=key, model=settings.model)
+        return OpenAITranslator(
+            api_key=key,
+            model=settings.model,
+            system_prompt_template=settings.system_prompt or None,
+        )
 
     raise TranslationError(f"Unknown translation provider: {provider!r}")
 

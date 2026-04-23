@@ -5,6 +5,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Optional
 
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a professional translator for video games and live chat. "
+    "Translate the user's text into natural, fluent {target_language}. "
+    "Preserve proper nouns, character names, place names, and game-specific "
+    "terminology. Keep the original line breaks. Do NOT add explanations, "
+    "quotation marks, or prefixes — output only the translation."
+)
+
 
 class TranslationError(RuntimeError):
     """Raised when a translator fails to produce a translation."""
@@ -40,15 +48,33 @@ class Translator(ABC):
         """
 
 
-def build_system_prompt(target_language: str) -> str:
-    """Return the shared system prompt used by AI-based translators."""
-    return (
-        "You are a professional translator for video games and live chat. "
-        f"Translate the user's text into natural, fluent {target_language}. "
-        "Preserve proper nouns, character names, place names, and game-specific "
-        "terminology. Keep the original line breaks. Do NOT add explanations, "
-        "quotation marks, or prefixes — output only the translation."
-    )
+def build_system_prompt(
+    target_language: str,
+    source_language: Optional[str] = None,
+    template: Optional[str] = None,
+) -> str:
+    """Render a system prompt.
+
+    The ``template`` may use ``{target_language}`` and ``{source_language}``
+    placeholders. Unknown placeholders (including stray braces from a
+    user-authored template) are tolerated — we fall back to the default
+    prompt in that case so that a malformed template never crashes the app.
+    """
+    tmpl = template if template and template.strip() else DEFAULT_SYSTEM_PROMPT
+    src = source_language or "auto"
+    try:
+        return tmpl.format(target_language=target_language, source_language=src)
+    except (KeyError, IndexError, ValueError):
+        # Fall back to defaults so a broken user template can never break translation.
+        return DEFAULT_SYSTEM_PROMPT.format(
+            target_language=target_language,
+            source_language=src,
+        )
 
 
-__all__ = ["Translator", "TranslationError", "build_system_prompt"]
+__all__ = [
+    "Translator",
+    "TranslationError",
+    "build_system_prompt",
+    "DEFAULT_SYSTEM_PROMPT",
+]

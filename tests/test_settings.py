@@ -41,3 +41,26 @@ def test_unknown_keys_ignored(tmp_path: Path) -> None:
     )
     loaded = load_settings(path)
     assert loaded.provider == "stub"
+
+
+def test_new_overlay_and_prompt_fields_round_trip(tmp_path: Path) -> None:
+    settings = AppSettings(
+        system_prompt="Translate into {target_language} with flair.",
+        overlay_font_family="Consolas",
+        overlay_font_size=18,
+        overlay_line_spacing=160,
+    )
+    path = tmp_path / "settings.json"
+    save_settings(settings, path)
+    loaded = load_settings(path)
+    assert loaded.system_prompt == "Translate into {target_language} with flair."
+    assert loaded.overlay_font_family == "Consolas"
+    assert loaded.overlay_font_size == 18
+    assert loaded.overlay_line_spacing == 160
+
+
+def test_default_new_fields() -> None:
+    s = AppSettings()
+    assert s.system_prompt == ""  # empty → use built-in default
+    assert s.overlay_font_family == ""  # empty → Qt default
+    assert s.overlay_line_spacing >= 100

@@ -5,7 +5,15 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPalette
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QGuiApplication,
+    QMouseEvent,
+    QPalette,
+    QTextBlockFormat,
+    QTextCursor,
+)
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -30,6 +38,8 @@ class ResultOverlay(QWidget):
         parent: Optional[QWidget] = None,
         font_size: int = 14,
         opacity: float = 0.92,
+        font_family: str = "",
+        line_spacing_percent: int = 140,
     ) -> None:
         super().__init__(parent)
         self.setWindowFlags(
@@ -46,8 +56,14 @@ class ResultOverlay(QWidget):
         self.setAutoFillBackground(True)
         self.setPalette(palette)
 
+        self._font_size = max(8, int(font_size))
+        self._font_family = (font_family or "").strip()
+        self._line_spacing_percent = max(100, min(300, int(line_spacing_percent)))
+
         font = QFont()
-        font.setPointSize(max(8, font_size))
+        if self._font_family:
+            font.setFamily(self._font_family)
+        font.setPointSize(self._font_size)
 
         self._title = QLabel("Translation")
         self._title.setStyleSheet(
@@ -104,6 +120,8 @@ class ResultOverlay(QWidget):
     ) -> None:
         self._source_view.setPlainText(source_text)
         self._translation_view.setPlainText(translated_text)
+        self._apply_line_spacing(self._source_view)
+        self._apply_line_spacing(self._translation_view)
         if near_region is not None:
             self._place_near(near_region)
         self.show()
@@ -113,8 +131,20 @@ class ResultOverlay(QWidget):
     def show_status(self, message: str) -> None:
         """Show a transient status message in the translation pane."""
         self._translation_view.setPlainText(message)
+        self._apply_line_spacing(self._translation_view)
         self.show()
         self.raise_()
+
+    # -------------------------------------------------------- styling
+    def _apply_line_spacing(self, view: QTextEdit) -> None:
+        """Apply the configured line spacing to every block in ``view``."""
+        block_fmt = QTextBlockFormat()
+        # LineHeightTypes.ProportionalHeight == 1 (percentage-based).
+        # Using the integer value keeps this compatible across PySide6 versions.
+        block_fmt.setLineHeight(self._line_spacing_percent, 1)
+        cursor = QTextCursor(view.document())
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.mergeBlockFormat(block_fmt)
 
     # -------------------------------------------------------- placement
     def _place_near(self, region: Region) -> None:

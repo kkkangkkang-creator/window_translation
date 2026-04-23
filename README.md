@@ -20,6 +20,12 @@ language, and other apps that don't have a built-in translator.
 - **Pluggable translators** — OpenAI-compatible Chat Completions endpoint
   (OpenAI, Azure OpenAI, local LLM gateways) plus an offline stub for
   testing.
+- **Customizable translation prompt** — edit the system prompt directly in
+  the settings dialog. Supports `{target_language}` and `{source_language}`
+  placeholders. Leave empty to use the built-in default.
+- **Overlay font & readability** — pick any installed system font, choose
+  font size, line spacing (100–300%), and window opacity. Settings are
+  persisted and applied on the fly.
 - **Tesseract OCR** with English / Japanese / Simplified Chinese language
   packs by default; easy to extend.
 - **System-tray app** with a settings dialog for provider, model, API key,
@@ -66,19 +72,19 @@ Drag a rectangle; the translation popup appears next to it.
 
 ### Configuration
 
-Open **Settings…** from the tray menu to edit:
+Open **Settings…** from the tray menu. It has three tabs:
 
-| Setting              | Description                                         |
-| -------------------- | --------------------------------------------------- |
-| Provider             | `openai` or `stub`                                  |
-| Model                | e.g. `gpt-4o-mini`                                  |
-| API key              | Stored separately with tight file permissions       |
-| OCR languages        | Tesseract codes, joined with `+` (e.g. `eng+jpn`)   |
-| Tesseract path       | Optional — if the binary isn't on `PATH`            |
-| Target language      | Plain English name (e.g. `Korean`, `English`)       |
-| Hotkey               | `pynput` format, e.g. `<ctrl>+<shift>+t`            |
-| Overlay font size    | Points                                              |
-| Pin-mode interval    | Milliseconds between checks while pinned            |
+**General** — provider, model, API key, OCR languages, Tesseract path,
+target language, hotkey, pin-mode interval.
+
+**Overlay** — system font picker (`QFontComboBox`), font size, line spacing
+(100–300%), window opacity.
+
+**Prompt** — freeform system-prompt editor with `{target_language}` and
+`{source_language}` placeholders; buttons to reset to the built-in default
+or clear the field (which also falls back to the default). Malformed
+templates are tolerated — the app silently falls back to the default
+instead of crashing.
 
 Settings and the API key are stored under:
 

@@ -36,12 +36,17 @@ class AppSettings:
     provider: str = "openai"  # "openai" | "stub"
     model: str = "gpt-4o-mini"
     target_language: str = "Korean"
+    # Custom system prompt. Empty = use the built-in default.
+    # Supports {target_language} and {source_language} placeholders.
+    system_prompt: str = ""
     # OCR
     ocr_languages: str = "eng+jpn+chi_sim"  # Tesseract language codes
     tesseract_cmd: str = ""  # Optional explicit path to tesseract binary
     # UX
     hotkey: str = "<ctrl>+<shift>+t"  # pynput format
+    overlay_font_family: str = ""  # Empty = Qt default
     overlay_font_size: int = 14
+    overlay_line_spacing: int = 140  # percent (100 = single spacing)
     overlay_opacity: float = 0.92
     # Region pin mode
     pin_mode_interval_ms: int = 1500
