@@ -1,10 +1,10 @@
-"""Frameless, always-on-top overlay window that shows a translation result."""
+"""번역 결과를 보여주는 프레임 없는 항상-위 오버레이 창."""
 
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -15,6 +15,7 @@ from PySide6.QtGui import (
     QTextCursor,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -27,11 +28,14 @@ from ..capture import Region
 
 
 class ResultOverlay(QWidget):
-    """Displays the original text and its translation next to the capture.
+    """캡처 영역 옆에 원문과 번역문을 함께 보여주는 위젯.
 
-    The window is frameless, stays on top, and can be dragged by its title
-    bar. A close button dismisses it.
+    프레임이 없고 항상 위에 떠 있으며, 제목 영역을 드래그해 이동할 수 있다.
+    우상단의 [복사], [재번역], [닫기] 버튼으로 빠르게 조작할 수 있다.
     """
+
+    #: 사용자가 [재번역] 버튼을 눌렀을 때 발생.
+    retranslate_requested = Signal()
 
     def __init__(
         self,
@@ -70,10 +74,26 @@ class ResultOverlay(QWidget):
             font.setFamily(self._font_family)
         font.setPointSize(self._font_size)
 
-        self._title = QLabel("Translation")
+        self._title = QLabel("번역")
         self._title.setStyleSheet(
             f"color: {t['title_fg']}; padding: 4px 8px; font-weight: 600;"
         )
+
+        btn_style = (
+            f"QPushButton {{ color: {t['close_fg']}; background: transparent; "
+            f"border: 1px solid {t['source_border']}; border-radius: 4px; "
+            "padding: 1px 6px; font-size: 11px; }} "
+            f"QPushButton:hover {{ color: {t['close_fg_hover']}; }}"
+        )
+        self._copy_btn = QPushButton("복사")
+        self._copy_btn.setToolTip("번역 결과를 클립보드에 복사합니다")
+        self._copy_btn.setStyleSheet(btn_style)
+        self._copy_btn.clicked.connect(self._copy_translation)
+
+        self._retranslate_btn = QPushButton("재번역")
+        self._retranslate_btn.setToolTip("같은 영역을 다시 캡처해 번역합니다")
+        self._retranslate_btn.setStyleSheet(btn_style)
+        self._retranslate_btn.clicked.connect(self.retranslate_requested.emit)
 
         self._close_btn = QPushButton("×")
         self._close_btn.setFixedSize(22, 22)
@@ -88,6 +108,8 @@ class ResultOverlay(QWidget):
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self._title)
         header.addStretch(1)
+        header.addWidget(self._copy_btn)
+        header.addWidget(self._retranslate_btn)
         header.addWidget(self._close_btn)
 
         self._source_view = QTextEdit()
@@ -192,6 +214,15 @@ class ResultOverlay(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         self._drag_offset = None
+
+    # -------------------------------------------------------- helpers
+    def _copy_translation(self) -> None:
+        text = self._translation_view.toPlainText()
+        if not text:
+            return
+        clip = QApplication.clipboard()
+        if clip is not None:
+            clip.setText(text)
 
 
 __all__ = ["ResultOverlay"]

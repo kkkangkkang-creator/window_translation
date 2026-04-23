@@ -64,3 +64,12 @@ def test_default_new_fields() -> None:
     assert s.system_prompt == ""  # empty → use built-in default
     assert s.overlay_font_family == ""  # empty → Qt default
     assert s.overlay_line_spacing >= 100
+    # 새로 추가된 OCR 엔진 설정의 기본값.
+    assert s.ocr_engine == "tesseract"
+
+
+def test_ocr_engine_round_trip(tmp_path: Path) -> None:
+    s = AppSettings(ocr_engine="paddleocr")
+    path = tmp_path / "settings.json"
+    save_settings(s, path)
+    assert load_settings(path).ocr_engine == "paddleocr"

@@ -1,0 +1,60 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Tesseract (chocolatey)
+        run: choco install tesseract -y --no-progress
+        shell: cmd
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller pytest
+        shell: cmd
+
+      - name: Run tests
+        run: python -m pytest -q
+        shell: cmd
+
+      - name: Build with PyInstaller
+        run: python -m PyInstaller --noconfirm window_translation.spec
+        shell: cmd
+
+      - name: Package dist directory as zip
+        run: powershell -Command "Compress-Archive -Path dist\window_translation\* -DestinationPath dist\window_translation-${{ github.ref_name }}.zip -Force"
+        shell: cmd
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: window_translation-${{ github.ref_name }}
+          path: dist/window_translation-${{ github.ref_name }}.zip
+
+      - name: Create GitHub Release and upload zip
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/window_translation-${{ github.ref_name }}.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

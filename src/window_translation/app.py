@@ -29,9 +29,9 @@ from PySide6.QtWidgets import (
 from .capture import Region, RegionSelector, capture_region, perceptual_hash
 from .capture.screen import hamming_distance
 from .config import AppSettings, default_history_path, load_settings
-from .history import HistoryStore, export_csv, export_json
-from .ocr import TesseractOCR
-from .overlay import ResultOverlay, SettingsDialog
+from .history import HistoryStore, export_csv, export_json, export_txt
+from .ocr import build_ocr
+from .overlay import HistoryViewer, ResultOverlay, SettingsDialog
 from .translate import Translator, TranslationError, build_translator
 
 log = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class TranslationWorker(QObject):
 
     def __init__(
         self,
-        ocr: TesseractOCR,
+        ocr,
         translator: Translator,
         target_language: str,
     ) -> None:
@@ -62,11 +62,16 @@ class TranslationWorker(QObject):
     def run(self) -> None:
         try:
             if self._image is None:
-                self.failed.emit("No image provided to translate.")
+                self.failed.emit("번역할 이미지가 없습니다.")
                 return
-            ocr_result = self._ocr.run(self._image)
+            try:
+                ocr_result = self._ocr.run(self._image)
+            except RuntimeError as exc:
+                # Tesseract 미설치, PaddleOCR 미설치 등 사용자에게 친절한 메시지.
+                self.failed.emit(str(exc))
+                return
             if ocr_result.is_empty():
-                self.failed.emit("No text detected in the selected region.")
+                self.failed.emit("OCR에서 텍스트를 찾지 못했습니다. 영역을 더 크게 잡아보세요.")
                 return
             try:
                 translated = self._translator.translate(
@@ -75,12 +80,12 @@ class TranslationWorker(QObject):
                     source_language=ocr_result.detected_language,
                 )
             except TranslationError as exc:
-                self.failed.emit(f"Translation failed: {exc}")
+                self.failed.emit(f"번역 실패: {exc}")
                 return
             self.finished.emit(ocr_result.text, translated)
         except Exception as exc:  # pragma: no cover — guard against thread-killing crashes
             log.exception("Worker crashed")
-            self.failed.emit(f"Unexpected error: {exc}")
+            self.failed.emit(f"예상치 못한 오류: {exc}")
 
 
 # --------------------------------------------------------------- global hotkey
@@ -154,18 +159,32 @@ class TranslatorApp(QObject):
         self._hotkey.activated.connect(self.start_region_selection)
         if not self._hotkey.start():
             self._notify(
-                "Global hotkey could not be registered. Use the tray menu instead."
+                "전역 단축키를 등록할 수 없습니다. 트레이 메뉴를 사용해주세요."
             )
+
+        # 앱 내 히스토리 뷰어 (싱글톤)
+        self._history_viewer: Optional[HistoryViewer] = None
 
     # ---------------------------------------------------------- overlay factory
     def _build_overlay(self) -> ResultOverlay:
-        return ResultOverlay(
+        overlay = ResultOverlay(
             font_size=self._settings.overlay_font_size,
             opacity=self._settings.overlay_opacity,
             font_family=self._settings.overlay_font_family,
             line_spacing_percent=self._settings.overlay_line_spacing,
             theme=self._settings.theme,
         )
+        overlay.retranslate_requested.connect(self._on_retranslate_requested)
+        return overlay
+
+    def _on_retranslate_requested(self) -> None:
+        """오버레이 [재번역] 버튼: 마지막 영역을 다시 캡처해 번역."""
+        if self._last_region is None:
+            self._notify("재번역할 영역이 없습니다. 먼저 영역을 선택해주세요.")
+            return
+        # pin 모드의 해시는 무효화하여 즉시 재실행되게 한다.
+        self._pinned_hash = None
+        self._run_translation(self._last_region, initial=True)
 
     # ---------------------------------------------------------- history store
     def _history_store(self) -> HistoryStore:
@@ -181,29 +200,33 @@ class TranslatorApp(QObject):
         tray.setToolTip("Window Translation")
 
         menu = QMenu()
-        act_translate = QAction("Translate region…", self)
+        act_translate = QAction("영역 번역…", self)
         act_translate.triggered.connect(self.start_region_selection)
         menu.addAction(act_translate)
 
-        self._act_pin = QAction("Pin current region (auto-retranslate)", self)
+        self._act_pin = QAction("현재 영역 핀 (자동 재번역)", self)
         self._act_pin.setCheckable(True)
         self._act_pin.toggled.connect(self._toggle_pin_mode)
         menu.addAction(self._act_pin)
 
         menu.addSeparator()
-        act_settings = QAction("Settings…", self)
+        act_settings = QAction("설정…", self)
         act_settings.triggered.connect(self.open_settings)
         menu.addAction(act_settings)
 
-        act_export = QAction("Export history…", self)
+        act_history = QAction("히스토리 보기…", self)
+        act_history.triggered.connect(self.show_history)
+        menu.addAction(act_history)
+
+        act_export = QAction("히스토리 내보내기…", self)
         act_export.triggered.connect(self.export_history)
         menu.addAction(act_export)
 
-        act_clear = QAction("Clear history", self)
+        act_clear = QAction("히스토리 삭제", self)
         act_clear.triggered.connect(self.clear_history)
         menu.addAction(act_clear)
 
-        act_quit = QAction("Quit", self)
+        act_quit = QAction("종료", self)
         act_quit.triggered.connect(self._quit)
         menu.addAction(act_quit)
 
@@ -247,7 +270,7 @@ class TranslatorApp(QObject):
         if on:
             if self._last_region is None:
                 self._notify(
-                    "No region selected yet. Use the hotkey first, then enable pin mode."
+                    "선택된 영역이 없습니다. 먼저 단축키로 영역을 한 번 잡은 뒤 핀을 켜주세요."
                 )
                 self._act_pin.setChecked(False)
                 return
@@ -294,18 +317,19 @@ class TranslatorApp(QObject):
             return
 
         if initial:
-            self._overlay.show_status("Capturing…")
+            self._overlay.show_status("캡처 중…")
             self._overlay._place_near(region)
 
         try:
             image = prefetched_image if prefetched_image is not None else capture_region(region)
         except Exception as exc:
-            self._overlay.show_status(f"Capture failed: {exc}")
+            self._overlay.show_status(f"캡처 실패: {exc}")
             return
 
-        ocr = TesseractOCR(
+        ocr = build_ocr(
+            self._settings.ocr_engine,
             languages=self._settings.ocr_languages,
-            tesseract_cmd=self._settings.tesseract_cmd or None,
+            tesseract_cmd=self._settings.tesseract_cmd,
         )
         try:
             translator = build_translator(
@@ -313,7 +337,7 @@ class TranslatorApp(QObject):
                 history_store=self._history_store(),
             )
         except TranslationError as exc:
-            self._overlay.show_status(f"Translator error: {exc}")
+            self._overlay.show_status(f"번역기 오류: {exc}")
             return
 
         worker = TranslationWorker(ocr, translator, self._settings.target_language)
@@ -332,7 +356,7 @@ class TranslatorApp(QObject):
         self._worker = worker
         self._worker_thread = thread
         if initial:
-            self._overlay.show_status("Running OCR + translation…")
+            self._overlay.show_status("OCR + 번역 중…")
         thread.start()
 
     def _on_worker_thread_finished(self) -> None:
@@ -354,21 +378,32 @@ class TranslatorApp(QObject):
             self._hotkey = GlobalHotkey(self._settings.hotkey, self)
             self._hotkey.activated.connect(self.start_region_selection)
             if not self._hotkey.start():
-                self._notify("Hotkey could not be re-registered. Use the tray menu.")
+                self._notify("단축키를 다시 등록할 수 없습니다. 트레이 메뉴를 사용해주세요.")
             # Re-style overlay by recreating it (simpler than hot-swapping styles).
             self._overlay = self._build_overlay()
 
+    def show_history(self) -> None:
+        """앱 내 히스토리 뷰어 창을 띄운다."""
+        store = self._history_store()
+        if self._history_viewer is None:
+            self._history_viewer = HistoryViewer(store)
+        else:
+            self._history_viewer.reload()
+        self._history_viewer.show()
+        self._history_viewer.raise_()
+        self._history_viewer.activateWindow()
+
     def export_history(self) -> None:
-        """Let the user pick a file and dump the translation history."""
+        """파일을 선택해 번역 히스토리를 저장한다."""
         store = self._history_store()
         if store.count() == 0:
-            self._notify("Translation history is empty — nothing to export.")
+            self._notify("히스토리가 비어있어 내보낼 항목이 없습니다.")
             return
         path_str, chosen = QFileDialog.getSaveFileName(
             None,
-            "Export translation history",
+            "번역 히스토리 내보내기",
             "translation_history.json",
-            "JSON (*.json);;CSV (*.csv)",
+            "JSON (*.json);;CSV (*.csv);;Text (*.txt)",
         )
         if not path_str:
             return
@@ -379,29 +414,31 @@ class TranslatorApp(QObject):
             entries = store.all()
             if chosen.startswith("CSV") or path.suffix.lower() == ".csv":
                 n = export_csv(entries, path)
+            elif chosen.startswith("Text") or path.suffix.lower() == ".txt":
+                n = export_txt(entries, path)
             else:
                 n = export_json(entries, path)
         except OSError as exc:
-            self._notify(f"Export failed: {exc}")
+            self._notify(f"내보내기 실패: {exc}")
             return
-        self._notify(f"Exported {n} translations to {path}")
+        self._notify(f"{n}건을 {path} 에 저장했습니다.")
 
     def clear_history(self) -> None:
         store = self._history_store()
         count = store.count()
         if count == 0:
-            self._notify("Translation history is already empty.")
+            self._notify("히스토리가 이미 비어있습니다.")
             return
         reply = QMessageBox.question(
             None,
-            "Clear translation history",
-            f"Delete all {count} stored translations? This cannot be undone.",
+            "히스토리 전체 삭제",
+            f"저장된 {count}건의 번역을 모두 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             removed = store.delete_all()
-            self._notify(f"Cleared {removed} translations.")
+            self._notify(f"{removed}건을 삭제했습니다.")
 
     def _notify(self, message: str) -> None:
         if self._tray.isVisible():
@@ -432,7 +469,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         QMessageBox.critical(
             None,
             "Window Translation",
-            "System tray is not available on this system.",
+            "이 시스템에서 시스템 트레이를 사용할 수 없습니다.",
         )
         return 1
 
