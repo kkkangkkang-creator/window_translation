@@ -33,15 +33,15 @@ class SettingsDialog(QDialog):
 
     def __init__(self, settings: AppSettings, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Window Translation — Settings")
+        self.setWindowTitle("Window Translation — 설정")
         self.setModal(True)
         self._settings = settings
 
         tabs = QTabWidget()
-        tabs.addTab(self._build_general_tab(), "General")
-        tabs.addTab(self._build_overlay_tab(), "Overlay")
-        tabs.addTab(self._build_prompt_tab(), "Prompt")
-        tabs.addTab(self._build_history_tab(), "History")
+        tabs.addTab(self._build_general_tab(), "일반")
+        tabs.addTab(self._build_overlay_tab(), "오버레이")
+        tabs.addTab(self._build_prompt_tab(), "프롬프트")
+        tabs.addTab(self._build_history_tab(), "히스토리")
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -89,10 +89,16 @@ class SettingsDialog(QDialog):
             )
         )
 
+        self._ocr_engine = QComboBox()
+        self._ocr_engine.addItem("Tesseract (별도 설치 필요)", "tesseract")
+        self._ocr_engine.addItem("PaddleOCR (Python 패키지)", "paddleocr")
+        idx = self._ocr_engine.findData(s.ocr_engine or "tesseract")
+        self._ocr_engine.setCurrentIndex(idx if idx >= 0 else 0)
+
         self._ocr_langs = QLineEdit(s.ocr_languages)
         self._ocr_langs.setPlaceholderText("eng+jpn+chi_sim")
         self._tesseract_cmd = QLineEdit(s.tesseract_cmd)
-        self._tesseract_cmd.setPlaceholderText("(optional) path to tesseract binary")
+        self._tesseract_cmd.setPlaceholderText("(선택) tesseract 실행파일 경로")
 
         self._target_lang = QLineEdit(s.target_language)
         self._hotkey = QLineEdit(s.hotkey)
@@ -109,17 +115,18 @@ class SettingsDialog(QDialog):
         self._interval.setValue(s.pin_mode_interval_ms)
 
         form = QFormLayout()
-        form.addRow("Provider", self._provider)
+        form.addRow("번역 제공자", self._provider)
         form.addRow("Endpoint URL", self._endpoint)
-        form.addRow("Model", self._model)
-        form.addRow("API key", self._api_key)
+        form.addRow("모델", self._model)
+        form.addRow("API 키", self._api_key)
         form.addRow("", self._show_key)
-        form.addRow("OCR languages", self._ocr_langs)
-        form.addRow("Tesseract path", self._tesseract_cmd)
-        form.addRow("Target language", self._target_lang)
-        form.addRow("Theme", self._theme)
-        form.addRow("Hotkey", self._hotkey)
-        form.addRow("Pin mode interval", self._interval)
+        form.addRow("OCR 엔진", self._ocr_engine)
+        form.addRow("OCR 언어", self._ocr_langs)
+        form.addRow("Tesseract 경로", self._tesseract_cmd)
+        form.addRow("번역 대상 언어", self._target_lang)
+        form.addRow("테마", self._theme)
+        form.addRow("단축키", self._hotkey)
+        form.addRow("핀 모드 주기", self._interval)
 
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -166,10 +173,10 @@ class SettingsDialog(QDialog):
         self._opacity.setValue(int(round(s.overlay_opacity * 100)))
 
         form = QFormLayout()
-        form.addRow("Font family", self._font_family)
-        form.addRow("Font size", self._font_size)
-        form.addRow("Line spacing", self._line_spacing)
-        form.addRow("Window opacity", self._opacity)
+        form.addRow("글꼴", self._font_family)
+        form.addRow("글자 크기", self._font_size)
+        form.addRow("줄 간격", self._line_spacing)
+        form.addRow("창 투명도", self._opacity)
 
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -187,15 +194,15 @@ class SettingsDialog(QDialog):
         if s.system_prompt:
             self._prompt_edit.setPlainText(s.system_prompt)
 
-        reset_btn = QPushButton("Reset to default")
+        reset_btn = QPushButton("기본값으로 되돌리기")
         reset_btn.clicked.connect(
             lambda: self._prompt_edit.setPlainText(DEFAULT_SYSTEM_PROMPT)
         )
-        clear_btn = QPushButton("Use built-in default (leave empty)")
+        clear_btn = QPushButton("내장 기본 사용 (비우기)")
         clear_btn.clicked.connect(self._prompt_edit.clear)
 
         hint = QLineEdit(
-            "Placeholders available: {target_language}, {source_language}"
+            "사용 가능한 변수: {target_language}, {source_language}"
         )
         hint.setReadOnly(True)
         hint.setFrame(False)
@@ -216,20 +223,19 @@ class SettingsDialog(QDialog):
     def _build_history_tab(self) -> QWidget:
         s = self._settings
 
-        self._history_enabled = QCheckBox("Enable translation history & cache")
+        self._history_enabled = QCheckBox("번역 히스토리 / 캐시 사용")
         self._history_enabled.setChecked(bool(s.history_enabled))
 
         self._recent_context = QSpinBox()
         self._recent_context.setRange(0, 10)
         self._recent_context.setValue(int(s.history_recent_context))
         self._recent_context.setToolTip(
-            "Prepend this many recent translations as few-shot examples to "
-            "improve terminology/tone consistency. 0 disables the feature."
+            "최근 번역 N건을 few-shot 예시로 함께 보내 용어/말투 일관성을 높입니다. 0이면 끔."
         )
 
         hint = QLineEdit(
-            "Exact repeats hit the cache (no API cost). "
-            "Recent-context > 0 improves consistency but costs more tokens."
+            "동일한 원문은 캐시에서 즉시 반환됩니다 (API 비용 0). "
+            "최근 예시 > 0 이면 일관성은 좋아지지만 토큰 비용이 늘어납니다."
         )
         hint.setReadOnly(True)
         hint.setFrame(False)
@@ -237,7 +243,7 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("", self._history_enabled)
-        form.addRow("Recent-context examples", self._recent_context)
+        form.addRow("최근 예시 개수", self._recent_context)
 
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -252,6 +258,7 @@ class SettingsDialog(QDialog):
         s.provider = self._provider.currentText().strip() or "openai"
         s.endpoint = self._endpoint.text().strip()
         s.model = self._model.text().strip() or "gpt-4o-mini"
+        s.ocr_engine = self._ocr_engine.currentData() or "tesseract"
         s.ocr_languages = self._ocr_langs.text().strip() or "eng"
         s.tesseract_cmd = self._tesseract_cmd.text().strip()
         s.target_language = self._target_lang.text().strip() or "Korean"

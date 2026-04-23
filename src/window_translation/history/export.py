@@ -1,9 +1,10 @@
-"""Export translation history to JSON or CSV."""
+"""번역 히스토리를 JSON / CSV / TXT로 내보내는 헬퍼."""
 
 from __future__ import annotations
 
 import csv
 import json
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -48,4 +49,23 @@ def export_csv(entries: Iterable[HistoryEntry], path: Path) -> int:
     return len(rows)
 
 
-__all__ = ["export_json", "export_csv", "CSV_FIELDS"]
+def export_txt(entries: Iterable[HistoryEntry], path: Path) -> int:
+    """히스토리를 사람이 읽기 쉬운 텍스트로 저장합니다.
+
+    한 줄 형식: ``[YYYY-MM-DD HH:MM:SS] 원문 → 번역``
+    여러 줄 텍스트의 줄바꿈은 ``⏎`` 로 치환해 한 줄을 유지합니다.
+    """
+    rows = list(entries)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for e in rows:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(e.created_at))
+        src = e.source_text.replace("\r", "").replace("\n", " ⏎ ")
+        tgt = e.translated_text.replace("\r", "").replace("\n", " ⏎ ")
+        lines.append(f"[{ts}] {src} → {tgt}")
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    return len(rows)
+
+
+__all__ = ["export_json", "export_csv", "export_txt", "CSV_FIELDS"]

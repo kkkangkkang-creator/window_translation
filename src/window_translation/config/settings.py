@@ -51,6 +51,7 @@ class AppSettings:
     # consistency. 0 disables the feature.
     history_recent_context: int = 0
     # OCR
+    ocr_engine: str = "tesseract"  # "tesseract" | "paddleocr"
     ocr_languages: str = "eng+jpn+chi_sim"  # Tesseract language codes
     tesseract_cmd: str = ""  # Optional explicit path to tesseract binary
     # UX

@@ -25,6 +25,8 @@ MANIFEST
 # PyInstaller
 *.manifest
 *.spec
+# 단, 우리가 직접 관리하는 spec 파일은 커밋합니다.
+!window_translation.spec
 
 # Unit test / coverage
 htmlcov/
