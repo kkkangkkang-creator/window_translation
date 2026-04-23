@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import requests
 
@@ -20,6 +20,20 @@ log = logging.getLogger(__name__)
 
 DEFAULT_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 DEFAULT_TIMEOUT = 30.0
+
+# Known OpenAI-compatible endpoints. Users can select one of these or enter
+# a custom URL (e.g. a LiteLLM / proxy server) in settings.
+ENDPOINT_PRESETS = {
+    "openai":       "https://api.openai.com/v1/chat/completions",
+    "openrouter":   "https://openrouter.ai/api/v1/chat/completions",
+    "groq":         "https://api.groq.com/openai/v1/chat/completions",
+    "ollama":       "http://localhost:11434/v1/chat/completions",
+    "lm-studio":    "http://localhost:1234/v1/chat/completions",
+    # Azure OpenAI uses a deployment-specific URL; we provide a template
+    # placeholder users must customise.
+    "azure-openai": "https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT/chat/completions?api-version=2024-02-15-preview",
+    "custom":       "",
+}
 
 
 class OpenAITranslator(Translator):
@@ -38,10 +52,15 @@ class OpenAITranslator(Translator):
             raise TranslationError("Missing OpenAI API key.")
         self._api_key = api_key
         self.model = model
-        self.endpoint = endpoint
+        self.endpoint = endpoint or DEFAULT_ENDPOINT
         self.timeout = timeout
         self._session = session or requests.Session()
         self._system_prompt_template = system_prompt_template or None
+        self._few_shot_examples: List[Tuple[str, str]] = []
+
+    def set_few_shot_examples(self, examples: List[Tuple[str, str]]) -> None:
+        """Register ``(source, translation)`` pairs to prepend as examples."""
+        self._few_shot_examples = list(examples or [])
 
     def translate(
         self,
@@ -62,13 +81,20 @@ class OpenAITranslator(Translator):
             template=self._system_prompt_template,
         )
 
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        # Inject prior translations as few-shot demonstrations for
+        # terminology / tone consistency.
+        for src, tgt in self._few_shot_examples:
+            if not src.strip() or not tgt.strip():
+                continue
+            messages.append({"role": "user", "content": src})
+            messages.append({"role": "assistant", "content": tgt})
+        messages.append({"role": "user", "content": user_prefix + text})
+
         payload = {
             "model": self.model,
             "temperature": 0.2,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prefix + text},
-            ],
+            "messages": messages,
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -107,4 +133,4 @@ class OpenAITranslator(Translator):
         return result
 
 
-__all__ = ["OpenAITranslator", "DEFAULT_ENDPOINT"]
+__all__ = ["OpenAITranslator", "DEFAULT_ENDPOINT", "ENDPOINT_PRESETS"]

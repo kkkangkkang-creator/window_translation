@@ -37,22 +37,32 @@ def test_stub_translator_empty_input() -> None:
 
 
 def test_factory_returns_stub_when_provider_stub() -> None:
-    t = build_translator(AppSettings(provider="stub"))
+    t = build_translator(AppSettings(provider="stub", history_enabled=False))
     assert isinstance(t, StubTranslator)
 
 
 def test_factory_falls_back_to_stub_without_key() -> None:
-    t = build_translator(AppSettings(provider="openai"), api_key="")
+    t = build_translator(
+        AppSettings(provider="openai", history_enabled=False), api_key=""
+    )
     assert isinstance(t, StubTranslator)
 
 
-def test_factory_unknown_provider_raises() -> None:
-    with pytest.raises(TranslationError):
-        build_translator(AppSettings(provider="not-a-thing"))
+def test_factory_unknown_provider_treated_as_openai_compatible() -> None:
+    # Previously this raised; now "unknown" is treated as a custom
+    # OpenAI-compatible endpoint — the user just needs to also supply a URL
+    # via settings.endpoint (for proxies).
+    t = build_translator(
+        AppSettings(provider="litellm-proxy", history_enabled=False),
+        api_key="sk-test",
+    )
+    assert isinstance(t, OpenAITranslator)
 
 
 def test_factory_builds_openai_when_key_present() -> None:
-    t = build_translator(AppSettings(provider="openai"), api_key="sk-test")
+    t = build_translator(
+        AppSettings(provider="openai", history_enabled=False), api_key="sk-test"
+    )
     assert isinstance(t, OpenAITranslator)
 
 
@@ -197,9 +207,90 @@ def test_openai_translator_uses_custom_prompt_template() -> None:
 def test_factory_passes_system_prompt_to_openai() -> None:
     custom = "Translate into {target_language} only."
     t = build_translator(
-        AppSettings(provider="openai", system_prompt=custom),
+        AppSettings(provider="openai", system_prompt=custom, history_enabled=False),
         api_key="sk-test",
     )
     assert isinstance(t, OpenAITranslator)
     # The stored template should be what we configured.
     assert t._system_prompt_template == custom  # type: ignore[attr-defined]
+
+
+# -------------------------------------------------- endpoint / presets
+
+
+def test_factory_uses_preset_endpoint_per_provider() -> None:
+    t = build_translator(
+        AppSettings(provider="openrouter", history_enabled=False),
+        api_key="sk-test",
+    )
+    assert isinstance(t, OpenAITranslator)
+    assert "openrouter.ai" in t.endpoint
+
+
+def test_factory_custom_endpoint_overrides_preset() -> None:
+    t = build_translator(
+        AppSettings(
+            provider="openai",
+            endpoint="http://my-proxy.local/v1/chat/completions",
+            history_enabled=False,
+        ),
+        api_key="sk-test",
+    )
+    assert isinstance(t, OpenAITranslator)
+    assert t.endpoint == "http://my-proxy.local/v1/chat/completions"
+
+
+def test_factory_wraps_with_cache_when_history_enabled(tmp_path) -> None:
+    from window_translation.history import HistoryStore
+    from window_translation.translate.cache import CachingTranslator
+
+    store = HistoryStore(tmp_path / "h.sqlite3")
+    t = build_translator(
+        AppSettings(provider="openai", history_enabled=True),
+        api_key="sk-test",
+        history_store=store,
+    )
+    assert isinstance(t, CachingTranslator)
+    assert isinstance(t.inner, OpenAITranslator)
+
+
+def test_openai_translator_uses_custom_endpoint() -> None:
+    session = _FakeSession(
+        _FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]})
+    )
+    t = OpenAITranslator(
+        api_key="sk-test",
+        endpoint="http://proxy.local/v1/chat/completions",
+        session=session,  # type: ignore[arg-type]
+    )
+    t.translate("hi")
+    assert session.last_request["url"] == "http://proxy.local/v1/chat/completions"
+
+
+def test_openai_translator_few_shot_in_payload() -> None:
+    session = _FakeSession(
+        _FakeResponse(200, {"choices": [{"message": {"content": "out"}}]})
+    )
+    t = OpenAITranslator(api_key="sk-test", session=session)  # type: ignore[arg-type]
+    t.set_few_shot_examples([("src1", "tgt1"), ("src2", "tgt2")])
+    t.translate("new src", target_language="Korean")
+    messages = session.last_request["data"]["messages"]
+    # Order: system, user(src1), assistant(tgt1), user(src2), assistant(tgt2), user(new)
+    roles = [m["role"] for m in messages]
+    assert roles == ["system", "user", "assistant", "user", "assistant", "user"]
+    assert messages[1]["content"] == "src1"
+    assert messages[2]["content"] == "tgt1"
+    assert messages[-1]["content"].endswith("new src")
+
+
+def test_openai_translator_skips_blank_few_shot_entries() -> None:
+    session = _FakeSession(
+        _FakeResponse(200, {"choices": [{"message": {"content": "out"}}]})
+    )
+    t = OpenAITranslator(api_key="sk-test", session=session)  # type: ignore[arg-type]
+    t.set_few_shot_examples([("", "tgt"), ("src", "  "), ("ok src", "ok tgt")])
+    t.translate("x")
+    messages = session.last_request["data"]["messages"]
+    # Only the well-formed pair should be kept.
+    assert len([m for m in messages if m["role"] == "assistant"]) == 1
+    assert messages[1]["content"] == "ok src"

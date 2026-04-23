@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from ..config import AppSettings, load_api_key, save_api_key, save_settings
 from ..config.secrets import clear_api_key
 from ..translate.base import DEFAULT_SYSTEM_PROMPT
+from ..translate.openai_client import ENDPOINT_PRESETS
 
 
 class SettingsDialog(QDialog):
@@ -39,6 +40,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_general_tab(), "General")
         tabs.addTab(self._build_overlay_tab(), "Overlay")
         tabs.addTab(self._build_prompt_tab(), "Prompt")
+        tabs.addTab(self._build_history_tab(), "History")
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -49,17 +51,32 @@ class SettingsDialog(QDialog):
         root = QVBoxLayout(self)
         root.addWidget(tabs)
         root.addWidget(buttons)
-        self.resize(520, 520)
+        self.resize(560, 560)
 
     # ------------------------------------------------------------------ tabs
     def _build_general_tab(self) -> QWidget:
         s = self._settings
 
+        # Provider preset dropdown — populated from ENDPOINT_PRESETS, plus "stub".
         self._provider = QComboBox()
-        self._provider.addItems(["openai", "stub"])
-        self._provider.setCurrentText(s.provider)
+        providers = list(ENDPOINT_PRESETS.keys()) + ["stub"]
+        self._provider.addItems(providers)
+        if s.provider in providers:
+            self._provider.setCurrentText(s.provider)
+        else:
+            # Unknown provider string — treat as custom so the user can see
+            # their endpoint.
+            self._provider.setCurrentText("custom")
+        self._provider.currentTextChanged.connect(self._on_provider_changed)
 
         self._model = QLineEdit(s.model)
+
+        # Endpoint URL — auto-filled from preset when empty, editable.
+        self._endpoint = QLineEdit(s.endpoint)
+        self._endpoint.setPlaceholderText(
+            ENDPOINT_PRESETS.get(self._provider.currentText(), "")
+            or "https://your-proxy.example.com/v1/chat/completions"
+        )
 
         self._api_key = QLineEdit(load_api_key() or "")
         self._api_key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -80,6 +97,10 @@ class SettingsDialog(QDialog):
         self._hotkey = QLineEdit(s.hotkey)
         self._hotkey.setPlaceholderText("<ctrl>+<shift>+t")
 
+        self._theme = QComboBox()
+        self._theme.addItems(["light", "dark"])
+        self._theme.setCurrentText(s.theme if s.theme in ("light", "dark") else "light")
+
         self._interval = QSpinBox()
         self._interval.setRange(300, 60000)
         self._interval.setSingleStep(100)
@@ -88,12 +109,14 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("Provider", self._provider)
+        form.addRow("Endpoint URL", self._endpoint)
         form.addRow("Model", self._model)
         form.addRow("API key", self._api_key)
         form.addRow("", self._show_key)
         form.addRow("OCR languages", self._ocr_langs)
         form.addRow("Tesseract path", self._tesseract_cmd)
         form.addRow("Target language", self._target_lang)
+        form.addRow("Theme", self._theme)
         form.addRow("Hotkey", self._hotkey)
         form.addRow("Pin mode interval", self._interval)
 
@@ -102,6 +125,21 @@ class SettingsDialog(QDialog):
         layout.addLayout(form)
         layout.addStretch(1)
         return page
+
+    def _on_provider_changed(self, provider: str) -> None:
+        """When the user switches provider, update endpoint helper text.
+
+        If the endpoint field is empty or matches a known preset, we also
+        overwrite it with the new preset so users aren't stuck with a stale
+        URL. Their custom URL is preserved if it doesn't match any preset.
+        """
+        preset = ENDPOINT_PRESETS.get(provider, "")
+        self._endpoint.setPlaceholderText(
+            preset or "https://your-proxy.example.com/v1/chat/completions"
+        )
+        current = self._endpoint.text().strip()
+        if not current or current in ENDPOINT_PRESETS.values():
+            self._endpoint.setText(preset)
 
     def _build_overlay_tab(self) -> QWidget:
         s = self._settings
@@ -174,15 +212,50 @@ class SettingsDialog(QDialog):
         layout.addLayout(btn_row)
         return page
 
+    def _build_history_tab(self) -> QWidget:
+        s = self._settings
+
+        self._history_enabled = QCheckBox("Enable translation history & cache")
+        self._history_enabled.setChecked(bool(s.history_enabled))
+
+        self._recent_context = QSpinBox()
+        self._recent_context.setRange(0, 10)
+        self._recent_context.setValue(int(s.history_recent_context))
+        self._recent_context.setToolTip(
+            "Prepend this many recent translations as few-shot examples to "
+            "improve terminology/tone consistency. 0 disables the feature."
+        )
+
+        hint = QLineEdit(
+            "Exact repeats hit the cache (no API cost). "
+            "Recent-context > 0 improves consistency but costs more tokens."
+        )
+        hint.setReadOnly(True)
+        hint.setFrame(False)
+        hint.setStyleSheet("color: #888;")
+
+        form = QFormLayout()
+        form.addRow("", self._history_enabled)
+        form.addRow("Recent-context examples", self._recent_context)
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(hint)
+        layout.addLayout(form)
+        layout.addStretch(1)
+        return page
+
     # ---------------------------------------------------- actions
     def accept(self) -> None:  # noqa: D401 — Qt override
         s = self._settings
         s.provider = self._provider.currentText().strip() or "openai"
+        s.endpoint = self._endpoint.text().strip()
         s.model = self._model.text().strip() or "gpt-4o-mini"
         s.ocr_languages = self._ocr_langs.text().strip() or "eng"
         s.tesseract_cmd = self._tesseract_cmd.text().strip()
         s.target_language = self._target_lang.text().strip() or "Korean"
         s.hotkey = self._hotkey.text().strip() or "<ctrl>+<shift>+t"
+        s.theme = self._theme.currentText().strip() or "light"
         s.pin_mode_interval_ms = int(self._interval.value())
 
         s.overlay_font_family = self._font_family.currentFont().family()
@@ -191,6 +264,9 @@ class SettingsDialog(QDialog):
         s.overlay_opacity = max(0.3, min(1.0, self._opacity.value() / 100.0))
 
         s.system_prompt = self._prompt_edit.toPlainText().strip()
+
+        s.history_enabled = bool(self._history_enabled.isChecked())
+        s.history_recent_context = int(self._recent_context.value())
 
         save_settings(s)
 

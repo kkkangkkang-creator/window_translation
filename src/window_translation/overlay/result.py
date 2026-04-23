@@ -40,6 +40,7 @@ class ResultOverlay(QWidget):
         opacity: float = 0.92,
         font_family: str = "",
         line_spacing_percent: int = 140,
+        theme: str = "light",
     ) -> None:
         super().__init__(parent)
         self.setWindowFlags(
@@ -50,9 +51,13 @@ class ResultOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setWindowOpacity(max(0.3, min(1.0, opacity)))
 
+        from .theme import get_theme
+
+        t = get_theme(theme)
+
         palette = self.palette()
-        palette.setColor(QPalette.ColorRole.Window, QColor(25, 25, 30))
-        palette.setColor(QPalette.ColorRole.WindowText, QColor(235, 235, 240))
+        palette.setColor(QPalette.ColorRole.Window, QColor(t["window_bg"]))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(t["window_fg"]))
         self.setAutoFillBackground(True)
         self.setPalette(palette)
 
@@ -67,14 +72,15 @@ class ResultOverlay(QWidget):
 
         self._title = QLabel("Translation")
         self._title.setStyleSheet(
-            "color: #b0b8c8; padding: 4px 8px; font-weight: 600;"
+            f"color: {t['title_fg']}; padding: 4px 8px; font-weight: 600;"
         )
 
         self._close_btn = QPushButton("×")
         self._close_btn.setFixedSize(22, 22)
         self._close_btn.setStyleSheet(
-            "QPushButton { color: #ddd; background: transparent; border: none; "
-            "font-size: 18px; } QPushButton:hover { color: #fff; }"
+            f"QPushButton {{ color: {t['close_fg']}; background: transparent; "
+            f"border: none; font-size: 18px; }} "
+            f"QPushButton:hover {{ color: {t['close_fg_hover']}; }}"
         )
         self._close_btn.clicked.connect(self.hide)
 
@@ -88,8 +94,9 @@ class ResultOverlay(QWidget):
         self._source_view.setReadOnly(True)
         self._source_view.setFont(font)
         self._source_view.setStyleSheet(
-            "QTextEdit { background: #1a1a1f; color: #9fb3c8; "
-            "border: 1px solid #2a2a33; border-radius: 4px; padding: 6px; }"
+            f"QTextEdit {{ background: {t['source_bg']}; color: {t['source_fg']}; "
+            f"border: 1px solid {t['source_border']}; border-radius: 4px; "
+            "padding: 6px; }}"
         )
         self._source_view.setMaximumHeight(120)
 
@@ -97,8 +104,9 @@ class ResultOverlay(QWidget):
         self._translation_view.setReadOnly(True)
         self._translation_view.setFont(font)
         self._translation_view.setStyleSheet(
-            "QTextEdit { background: #15151a; color: #f1f1f4; "
-            "border: 1px solid #2a2a33; border-radius: 4px; padding: 6px; }"
+            f"QTextEdit {{ background: {t['trans_bg']}; color: {t['trans_fg']}; "
+            f"border: 1px solid {t['trans_border']}; border-radius: 4px; "
+            "padding: 6px; }}"
         )
 
         layout = QVBoxLayout(self)

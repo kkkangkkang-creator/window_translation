@@ -5,41 +5,74 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from ..config import AppSettings, load_api_key
+from ..config import AppSettings, default_history_path, load_api_key
+from ..history import HistoryStore
 from .base import Translator, TranslationError
-from .openai_client import OpenAITranslator
+from .cache import CachingTranslator
+from .openai_client import DEFAULT_ENDPOINT, ENDPOINT_PRESETS, OpenAITranslator
 from .stub import StubTranslator
 
 log = logging.getLogger(__name__)
 
 
-def build_translator(settings: AppSettings, api_key: Optional[str] = None) -> Translator:
+def _resolve_endpoint(settings: AppSettings) -> str:
+    """Return the effective endpoint URL for the configured provider."""
+    # Explicit override always wins (handles the "custom" provider or any
+    # user-edited URL).
+    if settings.endpoint and settings.endpoint.strip():
+        return settings.endpoint.strip()
+    preset = ENDPOINT_PRESETS.get((settings.provider or "").lower())
+    return preset or DEFAULT_ENDPOINT
+
+
+def build_translator(
+    settings: AppSettings,
+    api_key: Optional[str] = None,
+    *,
+    history_store: Optional[HistoryStore] = None,
+) -> Translator:
     """Return a translator configured from ``settings``.
 
     Falls back to :class:`StubTranslator` when the chosen provider cannot be
-    instantiated (e.g. missing API key). Callers should surface this to the
-    user so they know translations are not real.
+    instantiated (e.g. missing API key). When ``settings.history_enabled``
+    the translator is wrapped in :class:`CachingTranslator`.
     """
     provider = (settings.provider or "openai").lower()
 
     if provider == "stub":
-        return StubTranslator()
-
-    if provider == "openai":
+        inner: Translator = StubTranslator()
+    else:
         key = api_key if api_key is not None else load_api_key()
         if not key:
             log.warning(
                 "No API key available for provider %r; falling back to stub translator.",
                 provider,
             )
-            return StubTranslator()
-        return OpenAITranslator(
-            api_key=key,
-            model=settings.model,
-            system_prompt_template=settings.system_prompt or None,
-        )
+            inner = StubTranslator()
+            provider = "stub"
+        else:
+            endpoint = _resolve_endpoint(settings)
+            inner = OpenAITranslator(
+                api_key=key,
+                model=settings.model,
+                endpoint=endpoint,
+                system_prompt_template=settings.system_prompt or None,
+            )
 
-    raise TranslationError(f"Unknown translation provider: {provider!r}")
+    if not settings.history_enabled:
+        return inner
+
+    store = history_store or HistoryStore(default_history_path())
+    return CachingTranslator(
+        inner,
+        store,
+        model=settings.model if provider != "stub" else "",
+        provider=provider,
+        recent_context=settings.history_recent_context,
+        enabled=True,
+    )
 
 
-__all__ = ["build_translator"]
+# Backward compat: some callers may not have a TranslationError import path
+# other than via this module.
+__all__ = ["build_translator", "TranslationError"]

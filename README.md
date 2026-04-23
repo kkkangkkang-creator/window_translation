@@ -18,11 +18,21 @@ language, and other apps that don't have a built-in translator.
   periodically and only re-translates when the pixels actually change (uses a
   perceptual hash to skip unchanged frames and avoid burning API credits).
 - **Pluggable translators** — OpenAI-compatible Chat Completions endpoint
-  (OpenAI, Azure OpenAI, local LLM gateways) plus an offline stub for
-  testing.
+  with presets for **OpenAI, Azure OpenAI, OpenRouter, Groq, Ollama, LM
+  Studio**, plus a `custom` option for any OpenAI-compatible proxy
+  (LiteLLM, vLLM, your own gateway). Endpoint URL is editable per preset.
+- **Translation history + cache** — every successful translation is stored
+  in a local SQLite database. Identical OCR output hits the cache so you
+  pay **zero API cost for repeats**. History is exportable to JSON / CSV
+  from the tray menu and can be cleared at any time.
+- **Few-shot consistency** — opt-in setting prepends your most recent
+  translations as examples in every call, so proper nouns, character
+  names, and tone stay consistent across consecutive captures.
 - **Customizable translation prompt** — edit the system prompt directly in
   the settings dialog. Supports `{target_language}` and `{source_language}`
   placeholders. Leave empty to use the built-in default.
+- **Light / dark theme** — overlay and settings UI ship with a light
+  palette by default; `dark` is available and easy to extend.
 - **Overlay font & readability** — pick any installed system font, choose
   font size, line spacing (100–300%), and window opacity. Settings are
   persisted and applied on the fly.

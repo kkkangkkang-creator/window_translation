@@ -18,11 +18,18 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QPixmap
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QMenu,
+    QMessageBox,
+    QSystemTrayIcon,
+)
 
 from .capture import Region, RegionSelector, capture_region, perceptual_hash
 from .capture.screen import hamming_distance
-from .config import AppSettings, load_settings
+from .config import AppSettings, default_history_path, load_settings
+from .history import HistoryStore, export_csv, export_json
 from .ocr import TesseractOCR
 from .overlay import ResultOverlay, SettingsDialog
 from .translate import Translator, TranslationError, build_translator
@@ -122,6 +129,7 @@ class TranslatorApp(QObject):
         super().__init__()
         self._app = app
         self._settings: AppSettings = load_settings()
+        self._history: Optional[HistoryStore] = None
 
         self._overlay = self._build_overlay()
 
@@ -156,7 +164,15 @@ class TranslatorApp(QObject):
             opacity=self._settings.overlay_opacity,
             font_family=self._settings.overlay_font_family,
             line_spacing_percent=self._settings.overlay_line_spacing,
+            theme=self._settings.theme,
         )
+
+    # ---------------------------------------------------------- history store
+    def _history_store(self) -> HistoryStore:
+        """Return the shared history store, creating it on first use."""
+        if getattr(self, "_history", None) is None:
+            self._history = HistoryStore(default_history_path())
+        return self._history
 
     # ---------------------------------------------------------- tray / menu
     def _build_tray(self) -> QSystemTrayIcon:
@@ -178,6 +194,14 @@ class TranslatorApp(QObject):
         act_settings = QAction("Settings…", self)
         act_settings.triggered.connect(self.open_settings)
         menu.addAction(act_settings)
+
+        act_export = QAction("Export history…", self)
+        act_export.triggered.connect(self.export_history)
+        menu.addAction(act_export)
+
+        act_clear = QAction("Clear history", self)
+        act_clear.triggered.connect(self.clear_history)
+        menu.addAction(act_clear)
 
         act_quit = QAction("Quit", self)
         act_quit.triggered.connect(self._quit)
@@ -284,7 +308,10 @@ class TranslatorApp(QObject):
             tesseract_cmd=self._settings.tesseract_cmd or None,
         )
         try:
-            translator = build_translator(self._settings)
+            translator = build_translator(
+                self._settings,
+                history_store=self._history_store(),
+            )
         except TranslationError as exc:
             self._overlay.show_status(f"Translator error: {exc}")
             return
@@ -330,6 +357,51 @@ class TranslatorApp(QObject):
                 self._notify("Hotkey could not be re-registered. Use the tray menu.")
             # Re-style overlay by recreating it (simpler than hot-swapping styles).
             self._overlay = self._build_overlay()
+
+    def export_history(self) -> None:
+        """Let the user pick a file and dump the translation history."""
+        store = self._history_store()
+        if store.count() == 0:
+            self._notify("Translation history is empty — nothing to export.")
+            return
+        path_str, chosen = QFileDialog.getSaveFileName(
+            None,
+            "Export translation history",
+            "translation_history.json",
+            "JSON (*.json);;CSV (*.csv)",
+        )
+        if not path_str:
+            return
+        from pathlib import Path
+
+        path = Path(path_str)
+        try:
+            entries = store.all()
+            if chosen.startswith("CSV") or path.suffix.lower() == ".csv":
+                n = export_csv(entries, path)
+            else:
+                n = export_json(entries, path)
+        except OSError as exc:
+            self._notify(f"Export failed: {exc}")
+            return
+        self._notify(f"Exported {n} translations to {path}")
+
+    def clear_history(self) -> None:
+        store = self._history_store()
+        count = store.count()
+        if count == 0:
+            self._notify("Translation history is already empty.")
+            return
+        reply = QMessageBox.question(
+            None,
+            "Clear translation history",
+            f"Delete all {count} stored translations? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            removed = store.delete_all()
+            self._notify(f"Cleared {removed} translations.")
 
     def _notify(self, message: str) -> None:
         if self._tray.isVisible():

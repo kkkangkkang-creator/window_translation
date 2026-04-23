@@ -10,6 +10,7 @@ from typing import Any, Dict
 
 APP_NAME = "window_translation"
 SETTINGS_FILENAME = "settings.json"
+HISTORY_FILENAME = "history.sqlite3"
 
 
 def default_config_dir() -> Path:
@@ -24,6 +25,10 @@ def default_config_dir() -> Path:
     return path
 
 
+def default_history_path() -> Path:
+    return default_config_dir() / HISTORY_FILENAME
+
+
 @dataclass
 class AppSettings:
     """User-configurable settings for the application.
@@ -33,21 +38,28 @@ class AppSettings:
     """
 
     # Translation
-    provider: str = "openai"  # "openai" | "stub"
+    provider: str = "openai"  # "openai" | "openrouter" | "groq" | "ollama" | "lm-studio" | "azure-openai" | "custom" | "stub"
     model: str = "gpt-4o-mini"
+    endpoint: str = ""  # Empty = use provider preset default
     target_language: str = "Korean"
     # Custom system prompt. Empty = use the built-in default.
     # Supports {target_language} and {source_language} placeholders.
     system_prompt: str = ""
+    # History / cache
+    history_enabled: bool = True
+    # How many recent translations to inject as few-shot examples for
+    # consistency. 0 disables the feature.
+    history_recent_context: int = 0
     # OCR
     ocr_languages: str = "eng+jpn+chi_sim"  # Tesseract language codes
     tesseract_cmd: str = ""  # Optional explicit path to tesseract binary
     # UX
     hotkey: str = "<ctrl>+<shift>+t"  # pynput format
+    theme: str = "light"  # "light" | "dark"
     overlay_font_family: str = ""  # Empty = Qt default
     overlay_font_size: int = 14
     overlay_line_spacing: int = 140  # percent (100 = single spacing)
-    overlay_opacity: float = 0.92
+    overlay_opacity: float = 0.95
     # Region pin mode
     pin_mode_interval_ms: int = 1500
     pin_mode_change_threshold: int = 5  # perceptual-hash distance
