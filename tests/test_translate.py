@@ -93,7 +93,7 @@ def test_openai_translator_happy_path() -> None:
     out = t.translate("hello", target_language="Korean", source_language="en")
     assert out == "안녕하세요"
 
-    # Authorisation header should be present and carry the key.
+    # Authorization header should be present and carry the key.
     assert session.last_request["headers"]["Authorization"] == "Bearer sk-test"
     body = session.last_request["data"]
     assert body["model"] == "gpt-4o-mini"
