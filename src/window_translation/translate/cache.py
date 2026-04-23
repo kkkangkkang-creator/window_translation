@@ -27,6 +27,10 @@ from .base import Translator, TranslationError
 
 log = logging.getLogger(__name__)
 
+# Hard cap on few-shot examples. More rarely improves consistency and each
+# example costs real input tokens; keep this conservative by default.
+MAX_RECENT_CONTEXT = 10
+
 
 class CachingTranslator(Translator):
     """Decorator that adds persistent caching + optional few-shot context."""
@@ -47,7 +51,7 @@ class CachingTranslator(Translator):
         self._provider = provider
         # Clamp to a sensible upper bound — more examples rarely helps and
         # costs real tokens.
-        self._recent_context = max(0, min(int(recent_context), 10))
+        self._recent_context = max(0, min(int(recent_context), MAX_RECENT_CONTEXT))
         self._enabled = bool(enabled)
 
     @property

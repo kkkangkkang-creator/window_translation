@@ -41,10 +41,13 @@ DARK: Dict[str, str] = {
 
 THEMES = {"light": LIGHT, "dark": DARK}
 
+# Stable list of valid theme names, for settings validation and UI dropdowns.
+THEME_NAMES = tuple(THEMES.keys())
+
 
 def get_theme(name: str) -> Dict[str, str]:
     """Return the requested theme, falling back to light for unknown names."""
     return THEMES.get((name or "").lower(), LIGHT)
 
 
-__all__ = ["LIGHT", "DARK", "THEMES", "get_theme"]
+__all__ = ["LIGHT", "DARK", "THEMES", "THEME_NAMES", "get_theme"]

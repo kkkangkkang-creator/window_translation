@@ -25,6 +25,7 @@ from ..config import AppSettings, load_api_key, save_api_key, save_settings
 from ..config.secrets import clear_api_key
 from ..translate.base import DEFAULT_SYSTEM_PROMPT
 from ..translate.openai_client import ENDPOINT_PRESETS
+from .theme import THEME_NAMES
 
 
 class SettingsDialog(QDialog):
@@ -98,8 +99,8 @@ class SettingsDialog(QDialog):
         self._hotkey.setPlaceholderText("<ctrl>+<shift>+t")
 
         self._theme = QComboBox()
-        self._theme.addItems(["light", "dark"])
-        self._theme.setCurrentText(s.theme if s.theme in ("light", "dark") else "light")
+        self._theme.addItems(list(THEME_NAMES))
+        self._theme.setCurrentText(s.theme if s.theme in THEME_NAMES else THEME_NAMES[0])
 
         self._interval = QSpinBox()
         self._interval.setRange(300, 60000)

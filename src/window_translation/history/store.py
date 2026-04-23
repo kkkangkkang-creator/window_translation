@@ -34,6 +34,12 @@ CREATE INDEX IF NOT EXISTS idx_created
     ON translations(created_at DESC);
 """
 
+# How long (in seconds) to wait for the SQLite write lock before raising.
+# Translation is latency-tolerant by design, but unbounded waits could
+# deadlock the pin-mode timer if anything ever holds a long-running
+# transaction, so we keep a small budget.
+DB_CONNECTION_TIMEOUT = 5.0
+
 
 def _normalise(text: str) -> str:
     """Collapse internal whitespace so near-identical OCR outputs hit cache."""
@@ -71,7 +77,7 @@ class HistoryStore:
 
     # ------------------------------------------------------------------ infra
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, timeout=5.0)
+        conn = sqlite3.connect(self.path, timeout=DB_CONNECTION_TIMEOUT)
         conn.row_factory = sqlite3.Row
         return conn
 
