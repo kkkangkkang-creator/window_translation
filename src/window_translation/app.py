@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import sys
 import traceback
-from typing import Optional
+from typing import Optional, Protocol
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QPixmap
@@ -37,6 +37,13 @@ from .translate import Translator, TranslationError, build_translator
 log = logging.getLogger(__name__)
 
 
+class _OCREngine(Protocol):
+    """Tesseract / PaddleOCR 백엔드가 공통으로 만족해야 하는 인터페이스."""
+
+    def run(self, img):  # noqa: D401, ANN001 — 런타임 PIL.Image 의존을 피함
+        ...
+
+
 # --------------------------------------------------------------------- worker
 class TranslationWorker(QObject):
     """Runs OCR + translation off the GUI thread."""
@@ -46,7 +53,7 @@ class TranslationWorker(QObject):
 
     def __init__(
         self,
-        ocr,
+        ocr: _OCREngine,
         translator: Translator,
         target_language: str,
     ) -> None:

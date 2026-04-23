@@ -81,7 +81,7 @@ def test_paddleocr_engine_has_run_method() -> None:
     assert eng.languages == "eng"
 
 
-def test_paddleocr_engine_run_raises_when_not_installed(monkeypatch) -> None:
+def test_paddleocr_engine_run_raises_when_not_installed() -> None:
     """paddleocr 미설치 시 사용자에게 친절한 RuntimeError 가 나야 한다."""
     if PaddleOCREngine.is_available():
         pytest.skip("paddleocr가 실제로 설치되어 있어 미설치 시나리오를 검증할 수 없음")
