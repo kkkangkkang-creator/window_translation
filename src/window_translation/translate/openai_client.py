@@ -96,10 +96,16 @@ class OpenAITranslator(Translator):
             "temperature": 0.2,
             "messages": messages,
         }
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
+        if "openai.azure.com" in self.endpoint:
+            headers = {
+                "api-key": self._api_key,
+                "Content-Type": "application/json",
+            }
+        else:
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            }
 
         try:
             resp = self._session.post(
