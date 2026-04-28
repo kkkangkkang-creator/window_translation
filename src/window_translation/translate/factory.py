@@ -44,12 +44,7 @@ def build_translator(
     else:
         key = api_key if api_key is not None else load_api_key()
         if not key:
-            log.warning(
-                "No API key available for provider %r; falling back to stub translator.",
-                provider,
-            )
-            inner = StubTranslator()
-            provider = "stub"
+            raise TranslationError("API 키가 설정되어 있지 않습니다. 설정에서 API 키를 입력해주세요.")
         else:
             endpoint = _resolve_endpoint(settings)
             inner = OpenAITranslator(
