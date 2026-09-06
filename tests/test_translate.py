@@ -298,3 +298,22 @@ def test_openai_translator_skips_blank_few_shot_entries() -> None:
     # Only the well-formed pair should be kept.
     assert len([m for m in messages if m["role"] == "assistant"]) == 1
     assert messages[1]["content"] == "ok src"
+
+
+@pytest.mark.parametrize("body, kind", [("", "빈 응답"), ("<html>private-content</html>", "HTML 웹페이지"), ("data: {}", "스트리밍 응답"), ("proxy error", "JSON이 아닌 응답")])
+def test_non_json_response_is_actionable_and_does_not_echo_body(body, kind):
+    session = _FakeSession(_FakeResponse(200, body))
+    t = OpenAITranslator(api_key="sk-test", session=session)
+    with pytest.raises(TranslationError) as error:
+        t.translate("hello")
+    assert kind in str(error.value)
+    assert "HTTP 200" in str(error.value)
+    assert "Endpoint URL" in str(error.value)
+    assert "private-content" not in str(error.value)
+
+
+@pytest.mark.parametrize("payload", [{}, [], {"choices": [{"message": {"content": []}}]}])
+def test_wrong_json_shape_has_clear_error(payload):
+    t = OpenAITranslator(api_key="sk-test", session=_FakeSession(_FakeResponse(200, payload)))
+    with pytest.raises(TranslationError, match="Chat Completions"):
+        t.translate("hello")

@@ -143,6 +143,16 @@ class ResultOverlay(QWidget):
         self._drag_offset: Optional[QPoint] = None
 
     # -------------------------------------------------------- public API
+    def clear_source(self) -> None:
+        self._source_view.clear()
+
+    def show_source(self, source_text: str, near_region: Optional[Region] = None) -> None:
+        self._source_view.setPlainText(source_text)
+        self._apply_line_spacing(self._source_view)
+        if near_region is not None:
+            self._place_near(near_region)
+        self.show_status("글자 인식 완료 · 번역 응답을 기다리는 중…")
+
     def show_translation(
         self,
         source_text: str,

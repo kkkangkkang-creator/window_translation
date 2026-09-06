@@ -129,9 +129,29 @@ class OpenAITranslator(Translator):
 
         try:
             data = resp.json()
+        except ValueError as exc:
+            body = resp.text.strip()
+            kind = ("빈 응답" if not body else
+                    "HTML 웹페이지" if body.lower().startswith(("<!doctype html", "<html")) else
+                    "스트리밍 응답" if body.startswith("data:") else "JSON이 아닌 응답")
+            # Never echo response bodies: a proxy may include source text or credentials.
+            message = (
+                f"번역 서버가 {kind}을 반환했습니다 (HTTP {resp.status_code}). "
+                "OCR은 완료됐으며 위쪽에서 원문을 확인할 수 있습니다. "
+                "설정의 Endpoint URL이 웹사이트 주소가 아닌 chat/completions API 주소인지 확인해주세요. "
+                "주소가 맞다면 프록시·로그인 페이지 또는 서버 응답 문제를 확인해야 합니다."
+            )
+            log.warning("Translation response was not JSON (HTTP %s; kind=%s)", resp.status_code, kind)
+            raise TranslationError(message) from exc
+        try:
             choice = data["choices"][0]["message"]["content"]
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise TranslationError(f"Unexpected API response: {exc}") from exc
+            if choice is not None and not isinstance(choice, str):
+                raise TypeError("message.content is not a string")
+        except (KeyError, IndexError, TypeError) as exc:
+            raise TranslationError(
+                "서버가 JSON을 반환했지만 Chat Completions 번역 형식이 아닙니다. "
+                "Endpoint URL과 번역 제공자의 API 형식을 확인해주세요. 원문은 위쪽에 남아 있습니다."
+            ) from exc
 
         result = (choice or "").strip()
         if not result:
