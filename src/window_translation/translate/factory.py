@@ -11,6 +11,8 @@ from .base import Translator, TranslationError
 from .cache import CachingTranslator
 from .openai_client import DEFAULT_ENDPOINT, ENDPOINT_PRESETS, OpenAITranslator
 from .stub import StubTranslator
+from .providers import AnthropicTranslator, api_endpoint
+from ..config.secrets import load_provider_key
 
 log = logging.getLogger(__name__)
 
@@ -41,14 +43,17 @@ def build_translator(
     if provider == "stub":
         inner: Translator = StubTranslator()
     else:
-        key = api_key if api_key is not None else load_api_key()
+        if not settings.model.strip():
+            raise TranslationError("설정에서 모델 목록을 불러와 선택하거나 모델명을 직접 입력해주세요.")
+        key = api_key if api_key is not None else load_provider_key(provider)
         if not key and provider in {"ollama", "lm-studio"}:
             key = "local"
         if not key:
             raise TranslationError("API 키가 설정되어 있지 않습니다. 설정에서 API 키를 입력해주세요.")
         else:
-            endpoint = _resolve_endpoint(settings)
-            inner = OpenAITranslator(
+            endpoint = api_endpoint(provider, _resolve_endpoint(settings))
+            client = AnthropicTranslator if provider == "anthropic" else OpenAITranslator
+            inner = client(
                 api_key=key,
                 model=settings.model,
                 endpoint=endpoint,

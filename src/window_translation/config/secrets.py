@@ -65,3 +65,37 @@ def clear_api_key() -> None:
         path.unlink()
     except FileNotFoundError:
         pass
+
+
+def _provider_keys() -> dict:
+    import json
+    path = default_config_dir() / 'api_keys.json'
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+        except (ValueError, OSError):
+            return {}
+        return data if isinstance(data, dict) else {}
+    # Legacy key belongs only to the saved provider, never a newly selected one.
+    from .settings import load_settings
+    old = load_api_key()
+    return {load_settings().provider: old} if old else {}
+
+
+def load_provider_key(provider: str) -> Optional[str]:
+    value = _provider_keys().get(provider)
+    return value if isinstance(value, str) and value else None
+
+
+def save_provider_keys(changes: dict) -> None:
+    import json
+    data = _provider_keys()
+    data.update({k: v.strip() for k, v in changes.items() if isinstance(v, str)})
+    path = default_config_dir() / 'api_keys.json'
+    tmp = path.with_suffix('.tmp')
+    tmp.write_text(json.dumps(data), encoding='utf-8')
+    try:
+        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
+    os.replace(tmp, path)
