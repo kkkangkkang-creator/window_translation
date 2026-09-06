@@ -5,3 +5,5 @@ Pillow>=11.0
 pytesseract>=0.3.10
 pynput>=1.7.6
 requests>=2.32.3
+
+windows-capture==2.0.1; sys_platform == "win32"

@@ -12,6 +12,8 @@ or (after install):
 from __future__ import annotations
 
 import logging
+import hashlib
+import copy
 import sys
 import traceback
 from typing import Optional, Protocol
@@ -22,12 +24,16 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QMenu,
+    QInputDialog,
     QMessageBox,
     QSystemTrayIcon,
 )
 
 from .capture import Region, RegionSelector, capture_region, perceptual_hash
 from .capture.screen import hamming_distance
+from .capture.window import list_windows, WindowCapture, relative_crop, crop_region
+from .overlay.inline import InlineOverlay
+from .ocr.tesseract import OCRBlock
 from .config import AppSettings, default_history_path, load_settings
 from .history import HistoryStore, export_csv, export_json, export_txt
 from .ocr import build_ocr
@@ -48,6 +54,7 @@ class _OCREngine(Protocol):
 class TranslationWorker(QObject):
     """Runs OCR + translation off the GUI thread."""
 
+    layout_ready = Signal(object, object)
     source_ready = Signal(str)
     finished = Signal(str, str)  # (source_text, translated_text)
     failed = Signal(str)
@@ -63,6 +70,9 @@ class TranslationWorker(QObject):
         self._translator = translator
         self._target_language = target_language
         self._image = None  # set via set_image
+        self.inline = False
+        self.memo = {}
+        self.validate_image = None
 
     def set_image(self, image) -> None:
         self._image = image
@@ -79,19 +89,48 @@ class TranslationWorker(QObject):
                 self.failed.emit(str(exc))
                 return
             if ocr_result.is_empty():
-                self.failed.emit("OCR에서 텍스트를 찾지 못했습니다. 영역을 더 크게 잡아보세요.")
+                self.layout_ready.emit([], self._image.size)
+                self.finished.emit("", "")
                 return
             self.source_ready.emit(ocr_result.text)
+            if self.inline:
+                blocks = ocr_result.blocks or [OCRBlock(ocr_result.text, 0, 0, self._image.width, self._image.height)]
+                results = []
+                for block in blocks:
+                    key = ' '.join(block.text.split())
+                    if key not in self.memo:
+                        self.memo[key] = self._translator.translate(block.text,
+                            target_language=self._target_language, source_language=ocr_result.detected_language)
+                        if len(self.memo) > 1000:
+                            self.memo.pop(next(iter(self.memo)))
+                    results.append((block, self.memo[key]))
+                if self.validate_image:
+                    latest = self.validate_image()
+                    if latest is not None and latest.tobytes() != self._image.tobytes():
+                        current = self._ocr.run(latest)
+                        current_blocks = current.blocks or ([OCRBlock(current.text, 0, 0, latest.width, latest.height)] if current.text.strip() else [])
+                        # Never place translations from an old page over a new page.
+                        if [(b.text, b.left, b.top, b.width, b.height) for b in current_blocks] != [(b.text, b.left, b.top, b.width, b.height) for b in blocks]:
+                            results = []
+                self.layout_ready.emit(results, self._image.size)
+                self.finished.emit(ocr_result.text, '\n'.join(t for _, t in results))
+                return
             try:
-                translated = self._translator.translate(
+                key = ' '.join(ocr_result.text.split())
+                translated = self.memo.get(key)
+                if translated is None:
+                    translated = self._translator.translate(
                     ocr_result.text,
                     target_language=self._target_language,
                     source_language=ocr_result.detected_language,
-                )
+                    )
+                    self.memo[key] = translated
             except TranslationError as exc:
                 self.failed.emit(f"번역 실패: {exc}")
                 return
             self.finished.emit(ocr_result.text, translated)
+        except TranslationError as exc:
+            self.failed.emit(f"번역 실패: {exc}")
         except Exception as exc:  # pragma: no cover — guard against thread-killing crashes
             log.exception("Worker crashed")
             self.failed.emit(f"예상치 못한 오류: {exc}")
@@ -146,6 +185,21 @@ class TranslatorApp(QObject):
         self._history: Optional[HistoryStore] = None
 
         self._overlay = self._build_overlay()
+        self._inline = InlineOverlay(self._settings)
+        self._window_capture = None
+        self._target = None
+        self._target_crop = (0, 0, 1, 1)
+        self._generation = 0
+        self._active_generation = -1
+        self._memo = {}
+        self._show_inline = True
+        self._last_frame_key = None
+        self._active_frame_key = None
+        self._layout = None
+        self._was_foreground = False
+        self._visibility_timer = QTimer(self)
+        self._visibility_timer.timeout.connect(self._sync_overlay)
+        self._visibility_timer.start(150)
 
         # Active capture region for region-pin mode.
         self._pinned_region: Optional[Region] = None
@@ -170,6 +224,10 @@ class TranslatorApp(QObject):
             self._notify(
                 "전역 단축키를 등록할 수 없습니다. 트레이 메뉴를 사용해주세요."
             )
+
+        self._toggle_hotkey = GlobalHotkey('<ctrl>+<alt>+<f10>', self)
+        self._toggle_hotkey.activated.connect(self.toggle_inline)
+        self._toggle_hotkey.start()
 
         # 앱 내 히스토리 뷰어 (싱글톤)
         self._history_viewer: Optional[HistoryViewer] = None
@@ -217,6 +275,15 @@ class TranslatorApp(QObject):
         act_translate = QAction("영역 번역…", self)
         act_translate.triggered.connect(self.start_region_selection)
         menu.addAction(act_translate)
+        choose_app = QAction("번역할 앱 선택…", self)
+        choose_app.triggered.connect(self.choose_window)
+        menu.addAction(choose_app)
+        screen_mode = QAction("앱 지정 해제 · 화면 영역 사용", self)
+        screen_mode.triggered.connect(self.clear_window)
+        menu.addAction(screen_mode)
+        toggle_overlay = QAction("원문 보기 / 번역 표시", self)
+        toggle_overlay.triggered.connect(self.toggle_inline)
+        menu.addAction(toggle_overlay)
 
         self._act_pin = QAction("현재 영역 핀 (자동 재번역)", self)
         self._act_pin.setCheckable(True)
@@ -228,7 +295,7 @@ class TranslatorApp(QObject):
         act_settings.triggered.connect(self.open_settings)
         menu.addAction(act_settings)
 
-        act_history = QAction("히스토리 보기…", self)
+        act_history = QAction("번역 라이브러리…", self)
         act_history.triggered.connect(self.show_history)
         menu.addAction(act_history)
 
@@ -259,10 +326,94 @@ class TranslatorApp(QObject):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.start_region_selection()
 
+    def choose_window(self):
+        windows = list_windows()
+        if not windows:
+            self._notify("선택할 앱이 없습니다. 번역할 앱을 먼저 열어주세요.")
+            return
+        labels = [f"{w.title}  ·  {w.pid}/{w.hwnd}" for w in windows]
+        label, ok = QInputDialog.getItem(None, "번역할 앱 선택", "다른 창에 가려져도 이 앱을 계속 읽습니다.", labels, 0, False)
+        if not ok:
+            return
+        target = windows[labels.index(label)]
+        try:
+            bounds = target.bounds()
+            capture = WindowCapture(target)
+        except Exception as exc:
+            self._notify(f"앱 캡처 시작 실패: {exc}")
+            return
+        self.clear_window()
+        self._target, self._window_capture = target, capture
+        self._target_crop = (0, 0, 1, 1)
+        self._last_region = self._pinned_region = bounds
+        self._act_pin.setChecked(True)
+        self._pin_timer.start(max(300, self._settings.pin_mode_interval_ms))
+        self._tray.setToolTip(f"번역 중: {target.title}")
+        self._notify("앱 전체 자동 번역을 시작합니다. 앱으로 돌아가 단축키를 누르면 번역 영역을 좁힐 수 있습니다.")
+
+    def clear_window(self):
+        self._generation += 1
+        self._memo = {}
+        self._last_frame_key = None
+        self._layout = None
+        self._inline.clear()
+        self._overlay.hide()
+        self._act_pin.setChecked(False)
+        if self._window_capture:
+            self._window_capture.stop()
+        self._window_capture = self._target = None
+        self._last_region = self._pinned_region = None
+        self._tray.setToolTip("Window Translation")
+
+    def toggle_inline(self):
+        self._show_inline = not self._show_inline
+        self._sync_overlay()
+
+    def _sync_overlay(self):
+        if self._target:
+            foreground = self._target.foreground()
+            if foreground and not self._was_foreground:
+                # Recheck current content before revealing stored overlays on return.
+                self._inline.clear()
+                self._last_frame_key = None
+            self._was_foreground = foreground
+            if not self._target.valid():
+                self.clear_window()
+                self._notify("번역 대상 앱이 닫혔습니다.")
+                return
+            try:
+                region = crop_region(self._target.bounds(), self._target_crop)
+                self._pinned_region = self._last_region = region
+                self._inline.place(region)
+            except RuntimeError:
+                self._inline.hide(); self._overlay.hide(); return
+        visible = (self._show_inline and self._selector is None and not self._capture_pending
+                   and (self._target is None or self._target.foreground()))
+        if self._settings.inline_overlay:
+            self._overlay.hide()
+            if visible and self._inline.blocks:
+                self._inline.show()
+            else:
+                self._inline.hide()
+        elif not visible:
+            self._overlay.hide()
+        elif self._last_frame_key is not None:
+            self._overlay.show()
+
+    def _capture_image(self, region):
+        if self._window_capture:
+            return self._window_capture.image(self._target_crop)
+        return capture_region(region)
+
+    @staticmethod
+    def _frame_key(image):
+        return hashlib.sha256(image.tobytes()).digest()
+
     # ---------------------------------------------------------- region flow
     def start_region_selection(self) -> None:
         if self._selector is not None and self._selector.isVisible():
             return
+        self._inline.hide()
         selector = RegionSelector()
         selector.region_selected.connect(self._on_region_selected)
         selector.cancelled.connect(lambda: setattr(self, "_selector", None))
@@ -274,7 +425,18 @@ class TranslatorApp(QObject):
 
     def _on_region_selected(self, region: Region) -> None:
         self._selector = None
+        if self._target:
+            try:
+                self._target_crop = relative_crop(region, self._target.bounds())
+                region = crop_region(self._target.bounds(), self._target_crop)
+            except (ValueError, RuntimeError) as exc:
+                self._notify(str(exc)); return
+        self._generation += 1
+        self._memo = {}
+        self._last_frame_key = None
+        self._inline.clear()
         self._last_region = region
+        self._act_pin.setChecked(True)
         if self._act_pin.isChecked():
             self._pinned_region = region
             self._pinned_hash = None  # force retranslate immediately
@@ -291,6 +453,7 @@ class TranslatorApp(QObject):
                 return
             self._pinned_region = self._last_region
             self._pinned_hash = None
+            self._last_frame_key = None
             interval = max(300, int(self._settings.pin_mode_interval_ms))
             self._pin_timer.start(interval)
         else:
@@ -299,34 +462,38 @@ class TranslatorApp(QObject):
             self._pinned_hash = None
 
     def _pin_tick(self) -> None:
-        if self._pinned_region is None:
+        if self._pinned_region is None or self._capture_pending or self._selector is not None:
             return
-        # Don't start a new job while one is in flight.
         if self._worker_thread is not None:
             return
-        if self._capture_pending or self._selector is not None:
+        # Desktop capture must not OCR our own output. Window capture excludes it.
+        if self._window_capture is None and (self._inline.isVisible() or self._overlay.isVisible()):
+            self._capture_pending = True
+            self._inline.hide(); self._overlay.hide()
+            QTimer.singleShot(100, self._pin_after_hide)
             return
-        if self._overlay.isVisible():
-            from PySide6.QtCore import QRect
-            r = self._pinned_region
-            if self._overlay.frameGeometry().intersects(QRect(r.left, r.top, r.width, r.height)):
-                self._overlay.hide()
-                QTimer.singleShot(100, self._pin_tick)
-                return
+        self._pin_after_hide()
+
+    def _pin_after_hide(self):
+        self._capture_pending = False
+        if not self._act_pin.isChecked() or self._pinned_region is None or self._quitting or self._worker_thread is not None:
+            return
         try:
-            image = capture_region(self._pinned_region)
+            image = self._capture_image(self._pinned_region)
         except Exception as exc:
-            log.warning("Pinned capture failed: %s", exc)
+            self._act_pin.setChecked(False)
+            self._inline.clear()
+            self._notify(f"캡처가 중지됐습니다: {exc}")
             return
-        new_hash = perceptual_hash(image)
-        if (
-            self._pinned_hash is not None
-            and hamming_distance(self._pinned_hash, new_hash)
-            <= max(0, int(self._settings.pin_mode_change_threshold))
-        ):
-            self._overlay.show()
-            return  # Image hasn't meaningfully changed.
-        self._pinned_hash = new_hash
+        if image is None:
+            return
+        key = self._frame_key(image)
+        if key == self._last_frame_key:
+            self._sync_overlay()
+            if not self._settings.inline_overlay and (not self._target or self._target.foreground()):
+                self._overlay.show()
+            return
+        self._inline.clear()
         self._run_translation(self._pinned_region, initial=False, prefetched_image=image)
 
     # ---------------------------------------------------------- pipeline
@@ -346,10 +513,14 @@ class TranslatorApp(QObject):
                 return
             self._capture_pending = True
             self._overlay.hide()
-            QTimer.singleShot(100, lambda: self._capture_and_translate(region, initial))
+            self._inline.hide()
+            generation = self._generation
+            QTimer.singleShot(100, lambda: self._capture_and_translate(region, initial) if generation == self._generation else setattr(self, "_capture_pending", False))
             return
 
         image = prefetched_image
+        self._active_frame_key = self._frame_key(image)
+        self._active_generation = self._generation
         self._overlay.clear_source()
 
         ocr = build_ocr(
@@ -363,10 +534,18 @@ class TranslatorApp(QObject):
                 history_store=self._history_store(),
             )
         except TranslationError as exc:
-            self._overlay.show_status(f"번역기 오류: {exc}")
+            self._on_translation_failed(f"번역기 오류: {exc}")
             return
 
         worker = TranslationWorker(ocr, translator, self._settings.target_language)
+        worker.inline = self._settings.inline_overlay
+        worker.memo = self._memo
+        if self._window_capture:
+            capture, crop = self._window_capture, self._target_crop
+            worker.validate_image = lambda: capture.image(crop)
+        if worker.inline and hasattr(ocr, 'psm'):
+            ocr.psm = 3
+        worker.layout_ready.connect(self._on_layout_ready)
         worker.set_image(image)
         thread = QThread(self)
         worker.moveToThread(thread)
@@ -392,7 +571,9 @@ class TranslatorApp(QObject):
         if self._quitting:
             return
         try:
-            image = capture_region(region)
+            image = self._capture_image(region)
+            if image is None:
+                return
         except Exception as exc:
             self._overlay.show_status(f"캡처 실패: {exc}")
             return
@@ -412,15 +593,39 @@ class TranslatorApp(QObject):
 
     @Slot(str)
     def _on_source_ready(self, source: str) -> None:
+        if self._active_generation != self._generation:
+            return
         self._overlay.show_source(source, near_region=self._active_region)
+        self._sync_overlay()
 
     @Slot(str, str)
     def _on_translation_finished(self, source: str, translated: str) -> None:
+        if self._active_generation != self._generation:
+            return
+        self._last_frame_key = self._active_frame_key
+        if not source:
+            self._inline.clear()
+            self._overlay.hide()
+            return
         self._overlay.show_translation(source, translated, near_region=self._active_region)
+        self._sync_overlay()
+
+    @Slot(object, object)
+    def _on_layout_ready(self, blocks, image_size):
+        if self._active_generation != self._generation:
+            return
+        self._inline.present(blocks, image_size, self._last_region or self._active_region)
+        self._sync_overlay()
 
     @Slot(str)
     def _on_translation_failed(self, message: str) -> None:
+        if self._active_generation != self._generation:
+            return
+        self._inline.clear()
         self._overlay.show_status(message)
+        # A failed API must not be retried and billed indefinitely by the timer.
+        self._act_pin.setChecked(False)
+        self._notify(message)
 
     # ---------------------------------------------------------- misc
     def open_settings(self) -> None:
@@ -428,11 +633,17 @@ class TranslatorApp(QObject):
             self._settings_dialog = SettingsDialog(self._settings)
             self._settings_dialog.settings_applied.connect(self._apply_settings)
             self._settings_dialog.capture_requested.connect(self.start_region_selection)
+            self._settings_dialog.app_requested.connect(self.choose_window)
         self._settings_dialog.show()
         self._settings_dialog.raise_()
         self._settings_dialog.activateWindow()
 
     def _apply_settings(self) -> None:
+        self._generation += 1
+        self._memo = {}
+        self._last_frame_key = None
+        self._inline.clear()
+        self._inline.settings = self._settings
         self._hotkey.stop()
         self._hotkey = GlobalHotkey(self._settings.hotkey, self)
         self._hotkey.activated.connect(self.start_region_selection)
@@ -511,6 +722,10 @@ class TranslatorApp(QObject):
     def _quit(self) -> None:
         try:
             self._pin_timer.stop()
+            self._visibility_timer.stop()
+            self._toggle_hotkey.stop()
+            if self._window_capture:
+                self._window_capture.stop()
             self._hotkey.stop()
         finally:
             self._quitting = True

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from .tesseract import OCRResult, _clean_ocr_text, detect_language
+from .tesseract import OCRResult, OCRBlock, _clean_ocr_text, detect_language
 
 if TYPE_CHECKING:  # pragma: no cover
     from PIL.Image import Image
@@ -106,6 +106,7 @@ class PaddleOCREngine:
 
         # raw 형태: [[ [box, (text, conf)], ... ]]  (버전에 따라 약간 다름)
         lines = []
+        blocks = []
         if raw:
             page = raw[0] if raw and isinstance(raw[0], list) else raw
             for item in page or []:
@@ -119,9 +120,14 @@ class PaddleOCREngine:
                     continue
                 if text:
                     lines.append(text)
+                    box = item.get('box') if isinstance(item, dict) else item[0]
+                    if box:
+                        xs, ys = [p[0] for p in box], [p[1] for p in box]
+                        blocks.append(OCRBlock(text, round(min(xs)), round(min(ys)),
+                                               max(1, round(max(xs)-min(xs))), max(1, round(max(ys)-min(ys)))))
 
         text = _clean_ocr_text("\n".join(lines))
-        return OCRResult(text=text, detected_language=detect_language(text))
+        return OCRResult(text=text, detected_language=detect_language(text), blocks=blocks)
 
 
 __all__ = ["PaddleOCREngine", "_pick_paddle_lang"]

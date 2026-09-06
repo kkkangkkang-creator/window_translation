@@ -63,6 +63,8 @@ class HistoryEntry:
     target_language: str = ""
     provider: str = ""
     model: str = ""
+    project: str = "기본"
+    cache_scope: str = ""
 
 
 class HistoryStore:
@@ -74,6 +76,10 @@ class HistoryStore:
         # Initialise schema up-front so every subsequent open is cheap.
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            columns = {row[1] for row in conn.execute('PRAGMA table_info(translations)')}
+            for name, default in [('project', '기본'), ('cache_scope', '')]:
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE translations ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
 
     # ------------------------------------------------------------------ infra
     def _connect(self) -> sqlite3.Connection:
@@ -87,6 +93,8 @@ class HistoryStore:
         source_text: str,
         target_language: str,
         model: str = "",
+        project: str | None = None,
+        cache_scope: str | None = None,
     ) -> Optional[HistoryEntry]:
         """Return the most recent cached translation, or ``None``.
 
@@ -106,6 +114,10 @@ class HistoryStore:
         if model:
             sql += " AND model = ?"
             params.append(model)
+        for column, value in [('project', project), ('cache_scope', cache_scope)]:
+            if value is not None:
+                sql += f" AND {column} = ?"
+                params.append(value)
         sql += " ORDER BY created_at DESC LIMIT 1"
         with self._connect() as conn:
             row = conn.execute(sql, params).fetchone()
@@ -121,6 +133,8 @@ class HistoryStore:
         target_language: str = "",
         provider: str = "",
         model: str = "",
+        project: str = "기본",
+        cache_scope: str = "",
     ) -> HistoryEntry:
         if not source_text.strip() or not translated_text.strip():
             raise ValueError("source_text and translated_text must be non-empty")
@@ -130,8 +144,8 @@ class HistoryStore:
             cur = conn.execute(
                 "INSERT INTO translations "
                 "(created_at, source_hash, source_text, translated_text, "
-                " source_language, target_language, provider, model) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " source_language, target_language, provider, model, project, cache_scope) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     now,
                     src_hash,
@@ -140,7 +154,7 @@ class HistoryStore:
                     source_language,
                     target_language,
                     provider,
-                    model,
+                    model, project, cache_scope,
                 ),
             )
             new_id = int(cur.lastrowid or 0)
@@ -153,7 +167,7 @@ class HistoryStore:
             source_language=source_language,
             target_language=target_language,
             provider=provider,
-            model=model,
+            model=model, project=project, cache_scope=cache_scope,
         )
 
     def delete_all(self) -> int:
@@ -166,6 +180,7 @@ class HistoryStore:
         self,
         limit: int = 50,
         target_language: Optional[str] = None,
+        project: str | None = None,
     ) -> List[HistoryEntry]:
         """Return the N most recent entries, newest first."""
         limit = max(0, int(limit))
@@ -174,6 +189,9 @@ class HistoryStore:
         if target_language:
             sql += " WHERE target_language = ?"
             params = (target_language,)
+        if project is not None:
+            sql += (" AND" if target_language else " WHERE") + " project = ?"
+            params = tuple(params) + (project,)
         sql += " ORDER BY created_at DESC LIMIT ?"
         params = tuple(params) + (limit,)
         with self._connect() as conn:
@@ -207,6 +225,7 @@ def _row_to_entry(row: sqlite3.Row) -> HistoryEntry:
         target_language=row["target_language"] or "",
         provider=row["provider"] or "",
         model=row["model"] or "",
+        project=row["project"], cache_scope=row["cache_scope"],
     )
 
 
@@ -226,4 +245,5 @@ def iter_entries(entries: Iterable[HistoryEntry]) -> Iterable[dict]:
             "target_language": e.target_language,
             "provider": e.provider,
             "model": e.model,
+            "project": e.project,
         }

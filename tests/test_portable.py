@@ -135,3 +135,7 @@ def test_hotkey_opens_selector_with_settings_visible(monkeypatch, tmp_path):
     controller._overlay.close()
     controller._tray.hide()
     controller._hotkey.stop()
+    controller._toggle_hotkey.stop()
+    controller._pin_timer.stop()
+    controller._visibility_timer.stop()
+    controller._inline.close()

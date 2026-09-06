@@ -44,7 +44,10 @@ class CachingTranslator(Translator):
         provider: str = "",
         recent_context: int = 0,
         enabled: bool = True,
+        project: str | None = None,
+        cache_scope: str | None = None,
     ) -> None:
+        self._project, self._cache_scope = project, cache_scope
         self._inner = inner
         self._store = store
         self._model = model
@@ -71,7 +74,7 @@ class CachingTranslator(Translator):
         # 1) Exact cache hit.
         if self._enabled:
             try:
-                hit = self._store.lookup(text, target_language, model=self._model)
+                hit = self._store.lookup(text, target_language, model=self._model, project=self._project, cache_scope=self._cache_scope)
             except Exception as exc:  # DB corruption, locked, etc. — keep translating.
                 log.warning("History lookup failed, falling through: %s", exc)
                 hit = None
@@ -107,6 +110,7 @@ class CachingTranslator(Translator):
                     target_language=target_language,
                     provider=self._provider,
                     model=self._model,
+                    project=self._project or "기본", cache_scope=self._cache_scope or "",
                 )
             except Exception as exc:
                 # Never let a history write failure break a translation.
@@ -121,6 +125,7 @@ class CachingTranslator(Translator):
         try:
             rows = self._store.recent(
                 limit=self._recent_context,
+                project=self._project,
                 target_language=target_language,
             )
         except Exception as exc:

@@ -116,6 +116,8 @@ class AnthropicTranslator(OpenAITranslator):
             if src.strip() and tgt.strip():
                 messages.extend([{'role': 'user', 'content': src}, {'role': 'assistant', 'content': tgt}])
         messages.append({'role': 'user', 'content': text})
+        if getattr(self, '_assistant_prefill', ''):
+            messages.append({'role': 'assistant', 'content': self._assistant_prefill})
         payload = {
             'model': self.model, 'max_tokens': 4096,
             'system': build_system_prompt(target_language, source_language=source_language, template=self._system_prompt_template),

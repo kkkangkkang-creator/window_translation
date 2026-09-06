@@ -63,6 +63,9 @@ class AppSettings:
     overlay_font_size: int = 14
     overlay_line_spacing: int = 140  # percent (100 = single spacing)
     overlay_opacity: float = 0.95
+    inline_overlay: bool = True
+    library_project: str = "기본"
+    assistant_prefill: str = ""
     # Region pin mode
     pin_mode_interval_ms: int = 1500
     pin_mode_change_threshold: int = 5  # perceptual-hash distance

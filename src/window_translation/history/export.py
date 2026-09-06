@@ -17,6 +17,7 @@ CSV_FIELDS = [
     "target_language",
     "provider",
     "model",
+    "project",
     "source_text",
     "translated_text",
 ]

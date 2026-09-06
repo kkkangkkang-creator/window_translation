@@ -47,7 +47,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: settings-preview
-          path: smoke-test.png
+          path: |
+            smoke-test.png
+            inline-preview.png
           if-no-files-found: error
       - name: Package portable folder
         shell: pwsh
@@ -68,7 +70,7 @@ jobs:
         if: github.ref == 'refs/heads/codex/windows-portable' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v0.3.0-preview' }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v0.4.0-preview' }}
           target_commitish: ${{ github.sha }}
           name: Window Translation — Windows portable preview
           prerelease: true
