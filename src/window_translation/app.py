@@ -368,7 +368,7 @@ class TranslatorApp(QObject):
 
         worker = TranslationWorker(ocr, translator, self._settings.target_language)
         worker.set_image(image)
-        thread = QThread()
+        thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         self._active_region = region
@@ -378,7 +378,6 @@ class TranslatorApp(QObject):
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
         thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self._on_worker_thread_finished)
 
         self._worker = worker
@@ -401,6 +400,11 @@ class TranslatorApp(QObject):
 
     @Slot()
     def _on_worker_thread_finished(self) -> None:
+        # finished may be emitted before the native thread completes TLS cleanup.
+        thread = self._worker_thread
+        if thread is not None:
+            thread.wait()
+            thread.deleteLater()
         self._worker = None
         self._worker_thread = None
         if self._quitting:

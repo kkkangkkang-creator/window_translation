@@ -273,6 +273,7 @@ class SettingsDialog(QDialog):
     @Slot()
     def _connection_finished(self):
         task = self._connection_thread
+        task.wait()
         self._connection_thread = None
         task.deleteLater()
         self._connect_btn.setEnabled(True)
