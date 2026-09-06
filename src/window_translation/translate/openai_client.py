@@ -24,6 +24,7 @@ DEFAULT_TIMEOUT = 30.0
 # Known OpenAI-compatible endpoints. Users can select one of these or enter
 # a custom URL (e.g. a LiteLLM / proxy server) in settings.
 ENDPOINT_PRESETS = {
+    "anthropic":    "https://api.anthropic.com/v1/messages",
     "openai":       "https://api.openai.com/v1/chat/completions",
     "openrouter":   "https://openrouter.ai/api/v1/chat/completions",
     "groq":         "https://api.groq.com/openai/v1/chat/completions",
@@ -93,7 +94,6 @@ class OpenAITranslator(Translator):
 
         payload = {
             "model": self.model,
-            "temperature": 0.2,
             "messages": messages,
         }
         if "openai.azure.com" in self.endpoint:

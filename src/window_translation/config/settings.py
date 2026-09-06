@@ -54,8 +54,10 @@ class AppSettings:
     ocr_engine: str = "tesseract"  # "tesseract" | "paddleocr"
     ocr_languages: str = "eng+jpn+chi_sim"  # Tesseract language codes
     tesseract_cmd: str = ""  # Optional explicit path to tesseract binary
+    provider_profiles: dict = field(default_factory=dict)
+    hotkey_version: int = 1
     # UX
-    hotkey: str = "<ctrl>+<shift>+t"  # pynput format
+    hotkey: str = "<ctrl>+<alt>+<f9>"  # pynput format
     theme: str = "light"  # "light" | "dark"
     overlay_font_family: str = ""  # Empty = Qt default
     overlay_font_size: int = 14
@@ -69,6 +71,9 @@ class AppSettings:
     def from_dict(cls, data: Dict[str, Any]) -> "AppSettings":
         known = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
         filtered = {k: v for k, v in data.items() if k in known}
+        if not filtered.get("hotkey_version") and filtered.get("hotkey") == "<ctrl>+<shift>+t":
+            filtered["hotkey"] = "<ctrl>+<alt>+<f9>"
+        filtered["hotkey_version"] = 1
         return cls(**filtered)
 
     def to_dict(self) -> Dict[str, Any]:

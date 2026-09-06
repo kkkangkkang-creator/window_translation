@@ -173,6 +173,7 @@ class TranslatorApp(QObject):
 
         # 앱 내 히스토리 뷰어 (싱글톤)
         self._history_viewer: Optional[HistoryViewer] = None
+        self._settings_dialog = None
         self._quitting = False
         self._capture_pending = False
         self._active_region = None
@@ -367,7 +368,7 @@ class TranslatorApp(QObject):
 
         worker = TranslationWorker(ocr, translator, self._settings.target_language)
         worker.set_image(image)
-        thread = QThread()
+        thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         self._active_region = region
@@ -377,7 +378,6 @@ class TranslatorApp(QObject):
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
         thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self._on_worker_thread_finished)
 
         self._worker = worker
@@ -400,10 +400,15 @@ class TranslatorApp(QObject):
 
     @Slot()
     def _on_worker_thread_finished(self) -> None:
+        # finished may be emitted before the native thread completes TLS cleanup.
+        thread = self._worker_thread
+        if thread is not None:
+            thread.wait()
+            thread.deleteLater()
         self._worker = None
         self._worker_thread = None
         if self._quitting:
-            self._app.quit()
+            self._finish_quit()
 
     @Slot(str)
     def _on_source_ready(self, source: str) -> None:
@@ -419,18 +424,25 @@ class TranslatorApp(QObject):
 
     # ---------------------------------------------------------- misc
     def open_settings(self) -> None:
-        dlg = SettingsDialog(self._settings)
-        if dlg.exec() == SettingsDialog.DialogCode.Accepted:
-            # Restart hotkey and refresh overlay style.
-            self._hotkey.stop()
-            self._hotkey = GlobalHotkey(self._settings.hotkey, self)
-            self._hotkey.activated.connect(self.start_region_selection)
-            if not self._hotkey.start():
-                self._notify("단축키를 다시 등록할 수 없습니다. 트레이 메뉴를 사용해주세요.")
-            # Re-style overlay by recreating it (simpler than hot-swapping styles).
-            self._overlay.close()
-            self._overlay.deleteLater()
-            self._overlay = self._build_overlay()
+        if self._settings_dialog is None:
+            self._settings_dialog = SettingsDialog(self._settings)
+            self._settings_dialog.settings_applied.connect(self._apply_settings)
+            self._settings_dialog.capture_requested.connect(self.start_region_selection)
+        self._settings_dialog.show()
+        self._settings_dialog.raise_()
+        self._settings_dialog.activateWindow()
+
+    def _apply_settings(self) -> None:
+        self._hotkey.stop()
+        self._hotkey = GlobalHotkey(self._settings.hotkey, self)
+        self._hotkey.activated.connect(self.start_region_selection)
+        if not self._hotkey.start():
+            self._notify("단축키를 등록할 수 없습니다. 다른 조합으로 바꾸거나 영역 선택 버튼을 사용해주세요.")
+        self._overlay.close()
+        self._overlay.deleteLater()
+        self._overlay = self._build_overlay()
+        if self._pin_timer.isActive():
+            self._pin_timer.setInterval(max(300, int(self._settings.pin_mode_interval_ms)))
 
     def show_history(self) -> None:
         """앱 내 히스토리 뷰어 창을 띄운다."""
@@ -502,10 +514,15 @@ class TranslatorApp(QObject):
             self._hotkey.stop()
         finally:
             self._quitting = True
-            if self._worker_thread is not None:
-                self._overlay.show_status("진행 중인 작업을 마치고 종료합니다…")
-            else:
-                self._app.quit()
+            self._finish_quit()
+
+    def _finish_quit(self) -> None:
+        connection_running = self._settings_dialog is not None and self._settings_dialog._connection_thread is not None
+        if self._worker_thread is not None or connection_running:
+            self._overlay.show_status("진행 중인 작업을 마치고 종료합니다…")
+            QTimer.singleShot(100, self._finish_quit)
+        else:
+            self._app.quit()
 
 
 # ----------------------------------------------------------------- entry point

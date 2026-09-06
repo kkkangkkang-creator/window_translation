@@ -7,8 +7,9 @@ Windows 화면에서 선택한 영역을 OCR로 읽어 한국어로 번역하는
 1. [Releases](https://github.com/kkkangkkang-creator/window_translation/releases)에서 **window_translation-windows-x64.zip**을 받습니다. `Source code` ZIP은 실행 파일이 아닙니다.
 2. ZIP 전체를 새 폴더에 압축 해제합니다. `window_translation.exe`와 `_internal` 폴더를 함께 두세요.
 3. EXE를 실행하면 설정 창이 열립니다. **OCR 준비 상태 확인**을 누르세요.
-4. 번역 제공자, 모델, API 키를 입력하고 확인을 누릅니다.
-5. **Ctrl+Shift+T**를 누르고 번역할 영역을 드래그합니다.
+4. 제공자를 고르면 API 주소가 채워집니다. API 키를 넣고 **연결 확인 · 모델 불러오기**를 누른 뒤 모델을 선택하고 **적용**합니다. 모델명과 API 주소는 직접 입력할 수도 있습니다.
+5. **번역 테스트**로 선택 모델의 실제 응답을 확인할 수 있습니다. 짧은 요청에 사용료가 발생할 수 있습니다.
+6. **Ctrl+Alt+F9**를 누르고 번역할 영역을 드래그합니다.
 
 Python 설치는 필요 없습니다. 배포 ZIP에는 Tesseract 실행 엔진과 영어·일본어·중국어 간체/번체 데이터가 포함됩니다. 온라인 번역에는 추출한 텍스트가 전송되고 제공자에 따라 사용료가 발생합니다. API 키는 ZIP에 포함되지 않습니다.
 
@@ -51,3 +52,9 @@ GitHub Actions도 같은 검사를 수행합니다. `codex/windows-portable` 브
 자동 검사는 Qt 위젯 생성, 포함된 언어 데이터와 실제 영어 OCR을 확인합니다. 실제 게임 화면 캡처 및 온라인 번역 성공까지 보장하는 검사는 아닙니다.
 
 Tesseract 및 언어 데이터의 라이선스 파일은 배포 폴더에 포함됩니다. 프로젝트 라이선스 선언은 `pyproject.toml`을 참고하세요.
+
+## API 설정과 단축키
+
+OpenAI, Anthropic(Claude), OpenRouter, Groq, Ollama, LM Studio와 커스텀 OpenAI 호환 서버를 선택할 수 있습니다. 제공자별 키·주소·모델을 기억하며 모델 목록은 서버에서 가져옵니다. Anthropic은 [공식 Messages API](https://platform.claude.com/docs/en/api/messages/create)와 [Models API](https://platform.claude.com/docs/en/api/models/list)를 사용합니다. Azure는 배포 URL과 모델을 직접 입력합니다.
+
+설정 창은 다른 창의 입력을 막지 않습니다. 적용 버튼으로 설정을 저장한 뒤 창을 열어둔 상태에서도 영역 선택이 가능합니다. 기존 기본 단축키 Ctrl+Shift+T는 브라우저와 충돌하므로 첫 업데이트에서 Ctrl+Alt+F9로 바뀝니다. 직접 설정한 다른 단축키는 유지합니다.
