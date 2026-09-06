@@ -48,6 +48,7 @@ class _OCREngine(Protocol):
 class TranslationWorker(QObject):
     """Runs OCR + translation off the GUI thread."""
 
+    source_ready = Signal(str)
     finished = Signal(str, str)  # (source_text, translated_text)
     failed = Signal(str)
 
@@ -80,6 +81,7 @@ class TranslationWorker(QObject):
             if ocr_result.is_empty():
                 self.failed.emit("OCR에서 텍스트를 찾지 못했습니다. 영역을 더 크게 잡아보세요.")
                 return
+            self.source_ready.emit(ocr_result.text)
             try:
                 translated = self._translator.translate(
                     ocr_result.text,
@@ -347,6 +349,7 @@ class TranslatorApp(QObject):
             return
 
         image = prefetched_image
+        self._overlay.clear_source()
 
         ocr = build_ocr(
             self._settings.ocr_engine,
@@ -368,6 +371,7 @@ class TranslatorApp(QObject):
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         self._active_region = region
+        worker.source_ready.connect(self._on_source_ready)
         worker.finished.connect(self._on_translation_finished)
         worker.failed.connect(self._on_translation_failed)
         worker.finished.connect(thread.quit)
@@ -400,6 +404,10 @@ class TranslatorApp(QObject):
         self._worker_thread = None
         if self._quitting:
             self._app.quit()
+
+    @Slot(str)
+    def _on_source_ready(self, source: str) -> None:
+        self._overlay.show_source(source, near_region=self._active_region)
 
     @Slot(str, str)
     def _on_translation_finished(self, source: str, translated: str) -> None:
