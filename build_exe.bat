@@ -1,28 +1,18 @@
 @echo off
-REM Window Translation 빌드 스크립트 (Windows)
-REM 사용: build_exe.bat
-REM 결과: dist\window_translation\window_translation.exe
-
 setlocal
-
-echo === [1/3] 의존성 설치 ===
-python -m pip install --upgrade pip || goto :fail
-python -m pip install -r requirements.txt pyinstaller || goto :fail
-
-echo === [2/3] 이전 빌드 정리 ===
-if exist build rmdir /S /Q build
-if exist dist rmdir /S /Q dist
-
-echo === [3/3] PyInstaller 빌드 ===
-python -m PyInstaller --noconfirm window_translation.spec || goto :fail
-
-echo.
-echo [완료] dist\window_translation\window_translation.exe 생성됨
-endlocal
+cd /d "%~dp0"
+python -m venv .build-venv || goto :fail
+set "BUILD_PY=%~dp0.build-venv\Scripts\python.exe"
+"%BUILD_PY%" -m pip install -r requirements.txt "pyinstaller>=6.11,<7" pytest || goto :fail
+powershell -NoProfile -File scripts\bundle_ocr.ps1 || goto :fail
+"%BUILD_PY%" -m pytest -q || goto :fail
+"%BUILD_PY%" -m PyInstaller --clean --noconfirm window_translation.spec || goto :fail
+copy /Y QUICKSTART.txt dist\window_translation\QUICKSTART.txt >nul
+powershell -NoProfile -Command "$p = Start-Process -FilePath 'dist\window_translation\window_translation.exe' -ArgumentList '--self-test smoke-test.json' -PassThru -Wait; exit $p.ExitCode" || goto :fail
+powershell -NoProfile -Command "Compress-Archive -Path dist\window_translation -DestinationPath dist\window_translation-windows-x64.zip -Force" || goto :fail
+echo Build complete: dist\window_translation-windows-x64.zip
 exit /b 0
-
 :fail
-echo.
-echo [실패] 빌드 중 오류가 발생했습니다. 위 메시지를 확인해주세요.
-endlocal
+echo Build failed. See the error above.
+pause
 exit /b 1

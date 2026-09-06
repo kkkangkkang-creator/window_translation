@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import logging
 import re
+import os
+import shutil
+import sys
+from pathlib import Path
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
@@ -66,6 +70,27 @@ class OCRResult:
         return not self.text.strip()
 
 
+def resolve_tesseract(explicit: Optional[str] = None) -> Optional[Path]:
+    """Prefer an explicit path, then the bundled engine, then system installs."""
+    if explicit:
+        path = Path(explicit.strip().strip('"'))
+        if path.is_dir():
+            path /= "tesseract.exe" if os.name == "nt" else "tesseract"
+        return path if path.is_file() else None
+    candidates = []
+    if getattr(sys, "frozen", False):
+        candidates.extend([
+            Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "tesseract" / "tesseract.exe",
+            Path(sys.executable).parent / "tesseract" / "tesseract.exe",
+        ])
+    installed = shutil.which("tesseract")
+    if installed:
+        candidates.append(Path(installed))
+    if os.name == "nt":
+        candidates.append(Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Tesseract-OCR" / "tesseract.exe")
+    return next((p for p in candidates if p.is_file()), None)
+
+
 class TesseractOCR:
     """Thin wrapper around :mod:`pytesseract`.
 
@@ -93,11 +118,15 @@ class TesseractOCR:
         self.psm = psm
 
     def _configure_binary(self) -> None:
-        if not self.tesseract_cmd:
-            return
         import pytesseract
 
-        pytesseract.pytesseract.tesseract_cmd = self.tesseract_cmd
+        executable = resolve_tesseract(self.tesseract_cmd)
+        if executable is None:
+            raise RuntimeError("OCR 엔진을 찾지 못했습니다. ZIP 전체를 압축 해제하거나 설정에서 tesseract.exe 경로를 지정해주세요.")
+        pytesseract.pytesseract.tesseract_cmd = str(executable)
+        # Use the matching language data, including in the portable EXE.
+        data = executable.parent / "tessdata"
+        self._data_dir = data if data.is_dir() else None
 
     def run(self, img: "Image") -> OCRResult:
         """Run OCR on ``img`` and return the cleaned text + detected lang."""
@@ -106,15 +135,23 @@ class TesseractOCR:
         self._configure_binary()
         prepared = preprocess_for_ocr(img)
         config = f"--psm {self.psm}"
+        previous_data = os.environ.get("TESSDATA_PREFIX")
+        if self._data_dir is not None:
+            os.environ["TESSDATA_PREFIX"] = str(self._data_dir)
         try:
             raw = pytesseract.image_to_string(
-                prepared, lang=self.languages, config=config
+                prepared, lang=self.languages, config=config, timeout=30
             )
         except pytesseract.TesseractNotFoundError:
             raise RuntimeError(
                 "Tesseract binary not found. Install Tesseract OCR and set "
                 "`tesseract_cmd` in settings if it is not on PATH."
             ) from None
+        finally:
+            if previous_data is None:
+                os.environ.pop("TESSDATA_PREFIX", None)
+            else:
+                os.environ["TESSDATA_PREFIX"] = previous_data
 
         text = _clean_ocr_text(raw)
         return OCRResult(text=text, detected_language=detect_language(text))

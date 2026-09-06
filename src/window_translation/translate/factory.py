@@ -33,9 +33,8 @@ def build_translator(
 ) -> Translator:
     """Return a translator configured from ``settings``.
 
-    Falls back to :class:`StubTranslator` when the chosen provider cannot be
-    instantiated (e.g. missing API key). When ``settings.history_enabled``
-    the translator is wrapped in :class:`CachingTranslator`.
+    Cloud providers require an API key. Local providers accept an empty key.
+    Stub translation must be selected explicitly. History enables caching.
     """
     provider = (settings.provider or "openai").lower()
 
@@ -43,6 +42,8 @@ def build_translator(
         inner: Translator = StubTranslator()
     else:
         key = api_key if api_key is not None else load_api_key()
+        if not key and provider in {"ollama", "lm-studio"}:
+            key = "local"
         if not key:
             raise TranslationError("API 키가 설정되어 있지 않습니다. 설정에서 API 키를 입력해주세요.")
         else:

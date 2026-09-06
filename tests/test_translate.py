@@ -41,11 +41,15 @@ def test_factory_returns_stub_when_provider_stub() -> None:
     assert isinstance(t, StubTranslator)
 
 
-def test_factory_falls_back_to_stub_without_key() -> None:
-    t = build_translator(
-        AppSettings(provider="openai", history_enabled=False), api_key=""
-    )
-    assert isinstance(t, StubTranslator)
+def test_factory_reports_missing_cloud_key() -> None:
+    with pytest.raises(TranslationError, match="API 키"):
+        build_translator(AppSettings(provider="openai", history_enabled=False), api_key="")
+
+
+@pytest.mark.parametrize("provider", ["ollama", "lm-studio"])
+def test_local_provider_allows_empty_key(provider) -> None:
+    translator = build_translator(AppSettings(provider=provider, history_enabled=False), api_key="")
+    assert isinstance(translator, OpenAITranslator)
 
 
 def test_factory_unknown_provider_treated_as_openai_compatible() -> None:

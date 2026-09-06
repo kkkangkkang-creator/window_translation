@@ -60,3 +60,8 @@ Thumbs.db
 config.local.json
 *.log
 /tmp_captures/
+
+# Local portable build inputs and smoke report
+vendor/
+.build-venv/
+smoke-test.json

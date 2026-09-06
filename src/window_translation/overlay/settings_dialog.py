@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtWidgets import (
+    QMessageBox,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -43,6 +44,9 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_prompt_tab(), "프롬프트")
         tabs.addTab(self._build_history_tab(), "히스토리")
 
+        check = QPushButton("OCR 준비 상태 확인")
+        check.clicked.connect(self._check_ocr)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -51,6 +55,7 @@ class SettingsDialog(QDialog):
 
         root = QVBoxLayout(self)
         root.addWidget(tabs)
+        root.addWidget(check)
         root.addWidget(buttons)
         self.resize(560, 560)
 
@@ -90,8 +95,8 @@ class SettingsDialog(QDialog):
         )
 
         self._ocr_engine = QComboBox()
-        self._ocr_engine.addItem("Tesseract (별도 설치 필요)", "tesseract")
-        self._ocr_engine.addItem("PaddleOCR (Python 패키지)", "paddleocr")
+        self._ocr_engine.addItem("Tesseract (배포 ZIP에 포함)", "tesseract")
+        self._ocr_engine.addItem("PaddleOCR (소스 실행용 선택 설치)", "paddleocr")
         idx = self._ocr_engine.findData(s.ocr_engine or "tesseract")
         self._ocr_engine.setCurrentIndex(idx if idx >= 0 else 0)
 
@@ -251,6 +256,32 @@ class SettingsDialog(QDialog):
         layout.addLayout(form)
         layout.addStretch(1)
         return page
+
+    def _check_ocr(self) -> None:
+        from ..ocr.tesseract import resolve_tesseract
+        import subprocess
+        if self._ocr_engine.currentData() != "tesseract":
+            QMessageBox.information(self, "OCR 확인", "이 배포본은 Tesseract를 포함합니다. PaddleOCR는 소스 실행 환경에서 별도로 설치해주세요.")
+            return
+        exe = resolve_tesseract(self._tesseract_cmd.text().strip())
+        if exe is None:
+            QMessageBox.warning(self, "OCR 확인", "OCR 엔진이 없습니다. ZIP 전체를 압축 해제하거나 실행파일 경로를 지정해주세요.")
+            return
+        try:
+            args = [str(exe), "--list-langs"]
+            if (exe.parent / "tessdata").is_dir():
+                args += ["--tessdata-dir", str(exe.parent / "tessdata")]
+            result = subprocess.run(args, capture_output=True, text=True, timeout=10,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if result.returncode:
+                raise RuntimeError("OCR 엔진 실행 실패")
+            available = set(result.stdout.splitlines()[1:])
+            missing = set(self._ocr_langs.text().strip().split("+")) - available
+            if missing:
+                raise RuntimeError("언어 데이터가 없습니다: " + ", ".join(sorted(missing)))
+            QMessageBox.information(self, "OCR 확인", "OCR 준비 완료! 선택한 언어를 사용할 수 있습니다.")
+        except Exception as exc:
+            QMessageBox.warning(self, "OCR 확인", str(exc))
 
     # ---------------------------------------------------- actions
     def accept(self) -> None:  # noqa: D401 — Qt override
