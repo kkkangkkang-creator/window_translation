@@ -7,7 +7,7 @@ name = "window-translation"
 version = "0.1.0"
 description = "Capture a region of the screen, OCR it, translate with an AI API, and show the result as an overlay."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "window_translation contributors" }]
 keywords = ["ocr", "translation", "overlay", "screen-capture", "ai"]
@@ -38,10 +38,10 @@ dev = [
 ]
 
 [project.scripts]
-window-translation = "window_translation.app:main"
+window-translation = "window_translation.launcher:main"
 
 [project.gui-scripts]
-window-translation-gui = "window_translation.app:main"
+window-translation-gui = "window_translation.launcher:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

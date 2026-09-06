@@ -53,6 +53,7 @@ class ResultOverlay(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setWindowOpacity(max(0.3, min(1.0, opacity)))
 
         from .theme import get_theme
@@ -156,7 +157,6 @@ class ResultOverlay(QWidget):
             self._place_near(near_region)
         self.show()
         self.raise_()
-        self.activateWindow()
 
     def show_status(self, message: str) -> None:
         """Show a transient status message in the translation pane."""

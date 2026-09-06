@@ -16,7 +16,7 @@ import sys
 import traceback
 from typing import Optional, Protocol
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -171,6 +171,10 @@ class TranslatorApp(QObject):
 
         # 앱 내 히스토리 뷰어 (싱글톤)
         self._history_viewer: Optional[HistoryViewer] = None
+        self._quitting = False
+        self._capture_pending = False
+        self._active_region = None
+        QTimer.singleShot(0, self.open_settings)
 
     # ---------------------------------------------------------- overlay factory
     def _build_overlay(self) -> ResultOverlay:
@@ -237,6 +241,7 @@ class TranslatorApp(QObject):
         act_quit.triggered.connect(self._quit)
         menu.addAction(act_quit)
 
+        self._tray_menu = menu  # Keep the Python-owned menu alive.
         tray.setContextMenu(menu)
         tray.activated.connect(self._on_tray_activated)
         return tray
@@ -259,7 +264,7 @@ class TranslatorApp(QObject):
         selector.region_selected.connect(self._on_region_selected)
         selector.cancelled.connect(lambda: setattr(self, "_selector", None))
         selector.destroyed.connect(lambda *_: setattr(self, "_selector", None))
-        selector.showFullScreen()
+        selector.show()
         selector.raise_()
         selector.activateWindow()
         self._selector = selector
@@ -294,8 +299,17 @@ class TranslatorApp(QObject):
         if self._pinned_region is None:
             return
         # Don't start a new job while one is in flight.
-        if self._worker_thread is not None and self._worker_thread.isRunning():
+        if self._worker_thread is not None:
             return
+        if self._capture_pending or self._selector is not None:
+            return
+        if self._overlay.isVisible():
+            from PySide6.QtCore import QRect
+            r = self._pinned_region
+            if self._overlay.frameGeometry().intersects(QRect(r.left, r.top, r.width, r.height)):
+                self._overlay.hide()
+                QTimer.singleShot(100, self._pin_tick)
+                return
         try:
             image = capture_region(self._pinned_region)
         except Exception as exc:
@@ -307,6 +321,7 @@ class TranslatorApp(QObject):
             and hamming_distance(self._pinned_hash, new_hash)
             <= max(0, int(self._settings.pin_mode_change_threshold))
         ):
+            self._overlay.show()
             return  # Image hasn't meaningfully changed.
         self._pinned_hash = new_hash
         self._run_translation(self._pinned_region, initial=False, prefetched_image=image)
@@ -319,19 +334,19 @@ class TranslatorApp(QObject):
         initial: bool,
         prefetched_image=None,
     ) -> None:
-        if self._worker_thread is not None and self._worker_thread.isRunning():
+        if self._worker_thread is not None:
             log.info("Translation already running; skipping.")
             return
 
-        if initial:
-            self._overlay.show_status("캡처 중…")
-            self._overlay._place_near(region)
-
-        try:
-            image = prefetched_image if prefetched_image is not None else capture_region(region)
-        except Exception as exc:
-            self._overlay.show_status(f"캡처 실패: {exc}")
+        if prefetched_image is None:
+            if self._capture_pending:
+                return
+            self._capture_pending = True
+            self._overlay.hide()
+            QTimer.singleShot(100, lambda: self._capture_and_translate(region, initial))
             return
+
+        image = prefetched_image
 
         ocr = build_ocr(
             self._settings.ocr_engine,
@@ -352,7 +367,8 @@ class TranslatorApp(QObject):
         thread = QThread()
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.finished.connect(lambda src, tgt: self._on_translation_finished(region, src, tgt))
+        self._active_region = region
+        worker.finished.connect(self._on_translation_finished)
         worker.failed.connect(self._on_translation_failed)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
@@ -363,16 +379,33 @@ class TranslatorApp(QObject):
         self._worker = worker
         self._worker_thread = thread
         if initial:
+            self._overlay._place_near(region)
             self._overlay.show_status("OCR + 번역 중…")
         thread.start()
 
+    def _capture_and_translate(self, region: Region, initial: bool) -> None:
+        self._capture_pending = False
+        if self._quitting:
+            return
+        try:
+            image = capture_region(region)
+        except Exception as exc:
+            self._overlay.show_status(f"캡처 실패: {exc}")
+            return
+        self._run_translation(region, initial=initial, prefetched_image=image)
+
+    @Slot()
     def _on_worker_thread_finished(self) -> None:
         self._worker = None
         self._worker_thread = None
+        if self._quitting:
+            self._app.quit()
 
-    def _on_translation_finished(self, region: Region, source: str, translated: str) -> None:
-        self._overlay.show_translation(source, translated, near_region=region)
+    @Slot(str, str)
+    def _on_translation_finished(self, source: str, translated: str) -> None:
+        self._overlay.show_translation(source, translated, near_region=self._active_region)
 
+    @Slot(str)
     def _on_translation_failed(self, message: str) -> None:
         self._overlay.show_status(message)
 
@@ -387,6 +420,8 @@ class TranslatorApp(QObject):
             if not self._hotkey.start():
                 self._notify("단축키를 다시 등록할 수 없습니다. 트레이 메뉴를 사용해주세요.")
             # Re-style overlay by recreating it (simpler than hot-swapping styles).
+            self._overlay.close()
+            self._overlay.deleteLater()
             self._overlay = self._build_overlay()
 
     def show_history(self) -> None:
@@ -458,7 +493,11 @@ class TranslatorApp(QObject):
             self._pin_timer.stop()
             self._hotkey.stop()
         finally:
-            self._app.quit()
+            self._quitting = True
+            if self._worker_thread is not None:
+                self._overlay.show_status("진행 중인 작업을 마치고 종료합니다…")
+            else:
+                self._app.quit()
 
 
 # ----------------------------------------------------------------- entry point

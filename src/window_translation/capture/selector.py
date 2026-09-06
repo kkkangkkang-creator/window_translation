@@ -98,6 +98,7 @@ class RegionSelector(QWidget):
         # Translate widget-local coordinates back to virtual-desktop coords.
         top_left = self.mapToGlobal(rect.topLeft())
         region = Region(top_left.x(), top_left.y(), rect.width(), rect.height())
+        self.hide()
         self.region_selected.emit(region)
         self.close()
 
@@ -130,7 +131,7 @@ def select_region(on_selected: Callable[[Region], None], on_cancel: Optional[Cal
     selector.region_selected.connect(on_selected)
     if on_cancel is not None:
         selector.cancelled.connect(on_cancel)
-    selector.showFullScreen()
+    selector.show()
     selector.raise_()
     selector.activateWindow()
     return selector
