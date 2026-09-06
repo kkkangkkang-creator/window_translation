@@ -135,8 +135,9 @@ class TesseractOCR:
         self._configure_binary()
         prepared = preprocess_for_ocr(img)
         config = f"--psm {self.psm}"
+        previous_data = os.environ.get("TESSDATA_PREFIX")
         if self._data_dir is not None:
-            config += f' --tessdata-dir "{self._data_dir}"'
+            os.environ["TESSDATA_PREFIX"] = str(self._data_dir)
         try:
             raw = pytesseract.image_to_string(
                 prepared, lang=self.languages, config=config, timeout=30
@@ -146,6 +147,11 @@ class TesseractOCR:
                 "Tesseract binary not found. Install Tesseract OCR and set "
                 "`tesseract_cmd` in settings if it is not on PATH."
             ) from None
+        finally:
+            if previous_data is None:
+                os.environ.pop("TESSDATA_PREFIX", None)
+            else:
+                os.environ["TESSDATA_PREFIX"] = previous_data
 
         text = _clean_ocr_text(raw)
         return OCRResult(text=text, detected_language=detect_language(text))
