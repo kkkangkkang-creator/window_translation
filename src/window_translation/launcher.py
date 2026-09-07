@@ -22,6 +22,21 @@ def self_test(output: Path) -> int:
         import subprocess
 
         app = QApplication.instance() or QApplication([])
+        from .overlay.inline import InlineOverlay
+        from .ocr.tesseract import OCRBlock
+        from .capture.screen import Region
+        from windows_capture import WindowsCapture
+        import inspect
+        if 'window_hwnd' not in inspect.signature(WindowsCapture).parameters:
+            raise RuntimeError('Window capture dependency is incompatible')
+        inline = InlineOverlay(AppSettings())
+        inline.present([(OCRBlock('Hello', 10, 10, 240, 70), '안녕하세요')], (300, 100), Region(10, 10, 300, 100))
+        inline.show()
+        app.processEvents()
+        inline.grab().save(str(output.with_name('inline-preview.png')))
+        inline.close()
+        report['window_capture_import'] = True
+        report['inline_overlay'] = True
         overlay = ResultOverlay()
         settings = SettingsDialog(AppSettings())
         overlay.show_translation("Hello", "안녕하세요")
@@ -44,7 +59,10 @@ def self_test(output: Path) -> int:
         img = Image.new("RGB", (700, 100), "white")
         font = ImageFont.truetype(str(Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts/arial.ttf"), 40)
         ImageDraw.Draw(img).text((20, 20), "HELLO WORLD", fill="black", font=font)
-        text = TesseractOCR(languages="eng").run(img).text
+        ocr_result = TesseractOCR(languages="eng").run(img)
+        text = ocr_result.text
+        if not ocr_result.blocks:
+            raise RuntimeError("OCR did not return text coordinates")
         if "HELLO" not in text.upper() or "WORLD" not in text.upper():
             raise RuntimeError("OCR smoke check failed: " + text)
         report.update(ok=True, ocr=text, languages=sorted(languages), qt=True)

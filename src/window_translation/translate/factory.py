@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 from typing import Optional
 
 from ..config import AppSettings, default_history_path, load_api_key
@@ -60,6 +62,12 @@ def build_translator(
                 system_prompt_template=settings.system_prompt or None,
             )
 
+    if settings.assistant_prefill.strip() and provider != 'stub':
+        if provider not in {'custom', 'ollama', 'lm-studio', 'openrouter', 'anthropic'}:
+            raise TranslationError('이 제공자의 프리필은 지원하지 않습니다. 프롬프트 탭의 프리필을 비워주세요.')
+        if provider == 'anthropic' and not any(tag in settings.model for tag in ('-3-', '-3-5-', '-3-7-', '-4-2025', '-4-1-', '-4-5-')):
+            raise TranslationError('이 Claude 모델은 프리필 지원이 확인되지 않았습니다. 프리필을 비우고 시스템 프롬프트를 사용해주세요.')
+        inner._assistant_prefill = settings.assistant_prefill
     if not settings.history_enabled:
         return inner
 
@@ -71,6 +79,10 @@ def build_translator(
         provider=provider,
         recent_context=settings.history_recent_context,
         enabled=True,
+        project=settings.library_project.strip() or '기본',
+        cache_scope=hashlib.sha256(json.dumps([provider, _resolve_endpoint(settings), settings.model,
+            settings.system_prompt, settings.assistant_prefill, settings.history_recent_context],
+            ensure_ascii=False).encode()).hexdigest(),
     )
 
 

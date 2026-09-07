@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "window-translation"
-version = "0.1.0"
+version = "0.4.0"
 description = "Capture a region of the screen, OCR it, translate with an AI API, and show the result as an overlay."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,6 +29,7 @@ dependencies = [
     "pytesseract>=0.3.10",
     "pynput>=1.7.6",
     "requests>=2.32.3",
+    "windows-capture==2.0.1; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

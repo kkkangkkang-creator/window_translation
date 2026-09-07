@@ -8,7 +8,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -59,12 +59,45 @@ def preprocess_for_ocr(img: "Image", upscale: float = 2.0) -> "Image":
     return gray
 
 
+@dataclass(frozen=True)
+class OCRBlock:
+    text: str
+    left: int
+    top: int
+    width: int
+    height: int
+
+
+def blocks_from_data(data, scale=2.0):
+    """Group words into paragraphs; map preprocessed coordinates to source pixels."""
+    groups = {}
+    for i, word in enumerate(data['text']):
+        if not word.strip() or float(data['conf'][i]) < 0:
+            continue
+        key = tuple(data[k][i] for k in ('page_num', 'block_num', 'par_num'))
+        groups.setdefault(key, []).append(i)
+    blocks = []
+    for indices in groups.values():
+        left = min(data['left'][i] for i in indices)
+        top = min(data['top'][i] for i in indices)
+        right = max(data['left'][i] + data['width'][i] for i in indices)
+        bottom = max(data['top'][i] + data['height'][i] for i in indices)
+        lines = {}
+        for i in indices:
+            lines.setdefault(data['line_num'][i], []).append(data['text'][i])
+        text = '\n'.join(' '.join(words) for words in lines.values())
+        blocks.append(OCRBlock(text, int(left/scale), int(top/scale),
+                               max(1, round((right-left)/scale)), max(1, round((bottom-top)/scale))))
+    return blocks
+
+
 @dataclass
 class OCRResult:
     """Outcome of a single OCR call."""
 
     text: str
     detected_language: str
+    blocks: list[OCRBlock] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not self.text.strip()
@@ -139,8 +172,9 @@ class TesseractOCR:
         if self._data_dir is not None:
             os.environ["TESSDATA_PREFIX"] = str(self._data_dir)
         try:
-            raw = pytesseract.image_to_string(
-                prepared, lang=self.languages, config=config, timeout=30
+            data = pytesseract.image_to_data(
+                prepared, lang=self.languages, config=config, timeout=30,
+                output_type=pytesseract.Output.DICT
             )
         except pytesseract.TesseractNotFoundError:
             raise RuntimeError(
@@ -153,8 +187,9 @@ class TesseractOCR:
             else:
                 os.environ["TESSDATA_PREFIX"] = previous_data
 
-        text = _clean_ocr_text(raw)
-        return OCRResult(text=text, detected_language=detect_language(text))
+        blocks = blocks_from_data(data)
+        text = _clean_ocr_text("\n".join(b.text for b in blocks))
+        return OCRResult(text=text, detected_language=detect_language(text), blocks=blocks)
 
 
 def _clean_ocr_text(text: str) -> str:

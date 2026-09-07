@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QDialog,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -34,7 +35,7 @@ from ..history import HistoryEntry, HistoryStore, export_csv, export_json, expor
 class HistoryViewer(QDialog):
     """히스토리 테이블 뷰어 (시각/원문/번역/모델)."""
 
-    COLUMNS = ("시각", "원문", "번역", "모델")
+    COLUMNS = ("시각", "원문", "번역", "모델", "작품 / 채널")
 
     def __init__(
         self,
@@ -42,7 +43,7 @@ class HistoryViewer(QDialog):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Window Translation — 히스토리")
+        self.setWindowTitle("Window Translation — 번역 라이브러리")
         self.setModal(False)
         self.resize(820, 520)
 
@@ -63,7 +64,11 @@ class HistoryViewer(QDialog):
         self._clear_btn = QPushButton("전체 삭제")
         self._clear_btn.clicked.connect(self._clear_all)
 
+        self._projects = QComboBox()
+        self._projects.addItem("모든 작품", None)
+        self._projects.currentIndexChanged.connect(self._apply_filter)
         top = QHBoxLayout()
+        top.addWidget(self._projects)
         top.addWidget(QLabel("검색:"))
         top.addWidget(self._search, 1)
         top.addWidget(self._refresh_btn)
@@ -103,6 +108,14 @@ class HistoryViewer(QDialog):
         except Exception as exc:
             QMessageBox.warning(self, "Window Translation", f"히스토리를 불러오지 못했습니다: {exc}")
             self._entries = []
+        selected = self._projects.currentData()
+        self._projects.blockSignals(True)
+        self._projects.clear()
+        self._projects.addItem("모든 작품", None)
+        for project in sorted({e.project for e in self._entries}):
+            self._projects.addItem(project, project)
+        self._projects.setCurrentIndex(max(0, self._projects.findData(selected)))
+        self._projects.blockSignals(False)
         self._apply_filter()
 
     def _apply_filter(self) -> None:
@@ -116,6 +129,9 @@ class HistoryViewer(QDialog):
         else:
             rows = list(self._entries)
 
+        if self._projects.currentData() is not None:
+            rows = [e for e in rows if e.project == self._projects.currentData()]
+        self._filtered_entries = rows
         self._table.setRowCount(len(rows))
         for i, e in enumerate(rows):
             ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(e.created_at))
@@ -124,6 +140,7 @@ class HistoryViewer(QDialog):
                 QTableWidgetItem(_one_line(e.source_text)),
                 QTableWidgetItem(_one_line(e.translated_text)),
                 QTableWidgetItem(e.model or ""),
+                QTableWidgetItem(e.project),
             ]
             # 더블클릭 시 원본 entry 를 복원할 수 있도록 행 0열에 인덱스 저장.
             items[0].setData(Qt.ItemDataRole.UserRole, e)
@@ -164,7 +181,7 @@ class HistoryViewer(QDialog):
             return
         path = Path(path_str)
         try:
-            n = _export_by_filter(self._entries, path, chosen)
+            n = _export_by_filter(self._filtered_entries, path, chosen)
         except OSError as exc:
             QMessageBox.warning(self, "Window Translation", f"내보내기 실패: {exc}")
             return

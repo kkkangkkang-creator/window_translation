@@ -92,6 +92,8 @@ class OpenAITranslator(Translator):
             messages.append({"role": "assistant", "content": tgt})
         messages.append({"role": "user", "content": user_prefix + text})
 
+        if getattr(self, '_assistant_prefill', ''):
+            messages.append({'role': 'assistant', 'content': self._assistant_prefill})
         payload = {
             "model": self.model,
             "messages": messages,

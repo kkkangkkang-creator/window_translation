@@ -67,6 +67,7 @@ class SettingsDialog(QDialog):
 
     settings_applied = Signal()
     capture_requested = Signal()
+    app_requested = Signal()
 
     def __init__(self, settings: AppSettings, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -85,7 +86,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_general_tab(), "일반")
         tabs.addTab(self._build_overlay_tab(), "오버레이")
         tabs.addTab(self._build_prompt_tab(), "프롬프트")
-        tabs.addTab(self._build_history_tab(), "히스토리")
+        tabs.addTab(self._build_history_tab(), "라이브러리")
 
         check = QPushButton("OCR 준비 상태 확인")
         check.clicked.connect(self._check_ocr)
@@ -105,6 +106,9 @@ class SettingsDialog(QDialog):
         capture = QPushButton("영역 선택해서 번역")
         capture.clicked.connect(self._capture_from_settings)
         root.addWidget(capture)
+        choose_app = QPushButton("앱 지정해서 백그라운드 번역")
+        choose_app.clicked.connect(self._app_from_settings)
+        root.addWidget(choose_app)
         root.addWidget(check)
         root.addWidget(buttons)
         self.resize(660, min(740, self.screen().availableGeometry().height() - 40))
@@ -192,6 +196,10 @@ class SettingsDialog(QDialog):
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(page)
         return scroll
+
+    def _app_from_settings(self):
+        if self.apply_settings():
+            self.app_requested.emit()
 
     def _capture_from_settings(self):
         if self.apply_settings():
@@ -303,6 +311,10 @@ class SettingsDialog(QDialog):
         self._opacity.setValue(int(round(s.overlay_opacity * 100)))
 
         form = QFormLayout()
+        self._inline_mode = QCheckBox("원문 위치에 번역 덮어쓰기 (클릭 통과)")
+        self._inline_mode.setChecked(s.inline_overlay)
+        form.addRow("표시 방식", self._inline_mode)
+        form.addRow("원문 / 번역 전환", QLabel("Ctrl+Alt+F10"))
         form.addRow("글꼴", self._font_family)
         form.addRow("글자 크기", self._font_size)
         form.addRow("줄 간격", self._line_spacing)
@@ -347,6 +359,11 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(page)
         layout.addWidget(hint)
         layout.addWidget(self._prompt_edit, 1)
+        layout.addWidget(QLabel("Assistant 프리필 · 지원하는 모델/서버에서만 사용"))
+        self._prefill = QPlainTextEdit(s.assistant_prefill)
+        self._prefill.setPlaceholderText("모델이 이어 쓸 답변의 시작 부분. 비워두면 사용하지 않습니다.")
+        self._prefill.setMaximumHeight(90)
+        layout.addWidget(self._prefill)
         layout.addLayout(btn_row)
         return page
 
@@ -374,6 +391,9 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow("", self._history_enabled)
         form.addRow("최근 예시 개수", self._recent_context)
+        self._project = QLineEdit(s.library_project)
+        self._project.setPlaceholderText("만화·게임·채널 이름")
+        form.addRow("저장할 작품 / 채널", self._project)
 
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -423,11 +443,14 @@ class SettingsDialog(QDialog):
         s.theme = self._theme.currentText().strip() or "light"
         s.pin_mode_interval_ms = int(self._interval.value())
 
+        s.inline_overlay = self._inline_mode.isChecked()
         s.overlay_font_family = self._font_family.currentFont().family()
         s.overlay_font_size = int(self._font_size.value())
         s.overlay_line_spacing = int(self._line_spacing.value())
         s.overlay_opacity = max(0.3, min(1.0, self._opacity.value() / 100.0))
 
+        s.assistant_prefill = self._prefill.toPlainText()
+        s.library_project = self._project.text().strip() or "기본"
         s.system_prompt = self._prompt_edit.toPlainText().strip()
 
         s.history_enabled = bool(self._history_enabled.isChecked())
